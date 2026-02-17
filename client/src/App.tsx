@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import './App.css'
+import { API_URL } from './config'
 
 async function checkNews(text: string) {
-  const res = await fetch("http://localhost:8000/predict", {
+  const res = await fetch(`${API_URL}/predict`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text })

@@ -2,23 +2,36 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import joblib
+import os
 
-app = FastAPI()
+app = FastAPI(title="Fake News Detection API")
 
 # เปิด CORS เพื่อให้ Frontend เรียกได้
+# สำหรับ production ให้รองรับทุก origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Vite default port
+    allow_origins=["*"],  # Production: รองรับทุก domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# โหลดโมเดล
 model = joblib.load("svm_model.pkl")
 vectorizer = joblib.load("tfidf.pkl")
 
 class News(BaseModel):
     text: str
+
+@app.get("/")
+def read_root():
+    return {
+        "message": "Fake News Detection API",
+        "status": "running",
+        "endpoints": {
+            "/predict": "POST - ตรวจสอบข่าวปลอม"
+        }
+    }
 
 @app.post("/predict")
 def predict(news: News):
