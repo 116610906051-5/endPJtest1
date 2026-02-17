@@ -3,13 +3,15 @@ python = "3.11"
 
 [phases.setup]
 nixPkgs = ["python311", "pip"]
+paths = ["/app/model"]
 
 [phases.install]
 dependsOn = ["setup"]
+paths = ["/app/model"]
 cmds = [
   "pip install --upgrade pip",
-  "pip install -r model/requirements.txt"
+  "cd /app/model && pip install -r requirements.txt"
 ]
 
 [start]
-cmd = "cd model && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
+cmd = "cd /app/model && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
