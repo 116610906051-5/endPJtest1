@@ -1,9 +1,9 @@
 # Production requirements (สำหรับรัน API บน Render)
-# ไม่ต้องใช้ pandas เพราะแค่โหลดโมเดลที่เทรนแล้ว
+# ใช้เวอร์ชันที่มี pre-built wheels
 
-fastapi==0.110.0
-uvicorn[standard]==0.27.1
-pydantic==2.7.1
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
 joblib==1.4.2
-scikit-learn==1.5.1
-numpy<2.0.0
+scikit-learn==1.6.1
+numpy==1.26.4
