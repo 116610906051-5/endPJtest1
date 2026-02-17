@@ -1,6 +1,4 @@
-# Production requirements (สำหรับรัน API บน Render)
-# ใช้เวอร์ชันที่มี pre-built wheels
-
+# Production requirements (Railway deployment)
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
 pydantic==2.10.3
