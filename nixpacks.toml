@@ -1,0 +1,14 @@
+[phases.setup]
+nixPkgs = ["python311"]
+nixpacksVersion = "1.21.0"
+
+[phases.install]
+dependsOn = ["setup"]
+cmds = [
+  "cd model",
+  "pip install --upgrade pip",
+  "pip install -r requirements.txt"
+]
+
+[start]
+cmd = "cd model && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
