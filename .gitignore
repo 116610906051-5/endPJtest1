@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.pkl
+*.joblib
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+*.log
+
+# Dataset (ถ้าไฟล์ใหญ่มาก)
+# dataset.csv
+
+# Model files (ถ้าต้องการไม่ commit model ที่เทรนแล้ว)
+# model/svm_model.pkl
+# model/tfidf.pkl
