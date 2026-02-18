@@ -35,13 +35,26 @@ def read_root():
 @app.post("/predict")
 def predict(news: News):
     X = vectorizer.transform([news.text])
-    decision = model.decision_function(X)[0]
-
-    # sigmoid แปลงเป็น %
-    confidence = 1 / (1 + math.exp(-decision))
-    confidence_percent = round(confidence * 100, 1)
+    
+    # ตรวจสอบว่าโมเดลมี decision_function หรือไม่
+    if hasattr(model, 'decision_function'):
+        # สำหรับ LinearSVC หรือโมเดลที่มี decision_function
+        decision = model.decision_function(X)[0]
+        confidence = 1 / (1 + math.exp(-decision))
+        confidence_percent = round(confidence * 100, 1)
+        decision_score = round(decision, 3)
+    elif hasattr(model, 'predict_proba'):
+        # สำหรับ Ensemble models และโมเดลอื่นๆ ที่มี predict_proba
+        proba = model.predict_proba(X)[0]
+        confidence_percent = round(proba[1] * 100, 1)  # probability ของ class 1 (ข่าวจริง)
+        decision_score = round(proba[1] - proba[0], 3)  # ส่งกลับความแตกต่างระหว่าง class
+    else:
+        # fallback สำหรับโมเดลที่ไม่มีทั้งสองแบบ
+        prediction = model.predict(X)[0]
+        confidence_percent = 100.0 if prediction == 1 else 0.0
+        decision_score = 1.0 if prediction == 1 else -1.0
 
     return {
         "confidence": confidence_percent,
-        "decision_score": round(decision, 3)
+        "decision_score": decision_score
     }

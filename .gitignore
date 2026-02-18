@@ -7,8 +7,8 @@ __pycache__/
 env/
 venv/
 ENV/
-*.pkl
-*.joblib
+# *.pkl  # Comment out to allow model files
+# *.joblib
 
 # Node
 node_modules/
