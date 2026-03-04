@@ -101,14 +101,19 @@ def predict(news: News):
         pred = model(seq_tensor).item()
     
     # คำนวณ confidence และ label
+    # pred = 0-1 (0=ข่าวปลอม, 1=ข่าวจริง)
     if pred > 0.5:
+        label = "ข่าวจริง"
         confidence_percent = round(pred * 100, 1)
     else:
+        label = "ข่าวปลอม"
         confidence_percent = round((1 - pred) * 100, 1)
     
     decision_score = round((pred - 0.5) * 2, 3)
     
     return {
         "confidence": confidence_percent,
-        "decision_score": decision_score
+        "decision_score": decision_score,
+        "label": label,
+        "raw_score": round(pred, 4)
     }
