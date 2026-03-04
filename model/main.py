@@ -56,29 +56,56 @@ class RelatedNews(BaseModel):
     is_trusted: bool
 
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
-    """ค้นหาข่าวที่เกี่ยวข้องจาก Google (simulated)"""
+    """ค้นหาข่าวที่เกี่ยวข้องจาก NewsAPI"""
     try:
-        # ในการใช้งานจริง ควรใช้ News API หรือ Google News API
-        # ตัวอย่างนี้จะ simulate การค้นหา
+        # สกัด keywords สำหรับค้นหา
+        keywords = extract_keywords(query)
+        search_query = " ".join(keywords[:3])  # ใช้ 3 keywords แรก
         
-        # สำหรับ demo: ใช้ Google Custom Search API (ต้องมี API key)
-        # หรือใช้ RSS feeds จากเว็บข่าวโดยตรง
+        # เรียก NewsAPI
+        params = {
+            "q": search_query,
+            "language": "th",  # ภาษาไทย
+            "sortBy": "relevancy",
+            "pageSize": max_results,
+            "apiKey": NEWS_API_KEY
+        }
         
+        response = requests.get(NEWS_API_BASE_URL, params=params, timeout=5)
+        
+        if response.status_code != 200:
+            print(f"NewsAPI error: {response.status_code}")
+            return []
+        
+        data = response.json()
         related_news = []
         
-        # ตัวอย่าง: ถ้ามีคำว่า "กรม" หรือ "รัฐบาล" ให้ค้นหาจากเว็บราชการ
-        keywords = extract_keywords(query)
-        
-        # Simulate related news (ในการใช้งานจริงต้องเรียก API)
-        if any(word in query for word in ["กรม", "รัฐบาล", "กระทรวง", "นายก"]):
-            related_news.append({
-                "title": f"ข่าวที่เกี่ยวข้องจากแหล่งราชการ",
-                "source": "thaipbs.or.th",
-                "url": "https://www.thaipbs.or.th",
-                "content": query[:100]
-            })
+        if data.get("status") == "ok" and data.get("articles"):
+            for article in data["articles"][:max_results]:
+                # ดึง domain จาก URL
+                source_url = article.get("url", "")
+                source_domain = ""
+                
+                if source_url:
+                    try:
+                        from urllib.parse import urlparse
+                        parsed = urlparse(source_url)
+                        source_domain = parsed.netloc.replace("www.", "")
+                    except:
+                        source_domain = article.get("source", {}).get("name", "unknown")
+                
+                related_news.append({
+                    "title": article.get("title", ""),
+                    "source": source_domain or article.get("source", {}).get("name", "unknown"),
+                    "url": article.get("url", ""),
+                    "content": article.get("description", "") or article.get("content", "")
+                })
         
         return related_news
+        
+    except requests.Timeout:
+        print("NewsAPI timeout")
+        return []
     except Exception as e:
         print(f"Error searching news: {e}")
         return []
