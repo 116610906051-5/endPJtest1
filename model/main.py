@@ -40,6 +40,10 @@ TRUSTED_NEWS_SOURCES = [
     "dailynews.co.th"
 ]
 
+# NewsAPI Configuration
+NEWS_API_KEY = "277729d09fc640549010e57ecb99c09d"
+NEWS_API_BASE_URL = "https://newsapi.org/v2/everything"
+
 class News(BaseModel):
     text: str
     check_related: Optional[bool] = False
