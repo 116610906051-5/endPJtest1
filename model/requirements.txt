@@ -1,4 +1,4 @@
-# Production requirements (Railway deployment)
+﻿# Production requirements (Railway deployment)
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
 pydantic==2.10.3
@@ -9,3 +9,4 @@ xgboost==2.1.3
 requests==2.31.0
 beautifulsoup4==4.12.3
 pythainlp==5.0.4
+torch==2.5.1
