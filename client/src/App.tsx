@@ -13,6 +13,15 @@ async function checkNews(text: string) {
   return data; // { confidence: number, decision_score: number }
 }
 
+interface RelatedNews {
+  title: string;
+  source: string;
+  url: string;
+  similarity: number;
+  is_trusted: boolean;
+  publishedAt?: string;
+}
+
 function App() {
   const [currentPage, setCurrentPage] = useState<'home' | 'test'>('home')
   const [inputText, setInputText] = useState('')
@@ -20,6 +29,9 @@ function App() {
     isAnalyzing: boolean; 
     verdict: string | null;
     confidence?: number;
+    relatedNews?: RelatedNews[];
+    verificationNote?: string;
+    trustedSourcesFound?: number;
   }>({
     isAnalyzing: false,
     verdict: null
@@ -31,6 +43,9 @@ function App() {
     try {
       const data = await checkNews(inputText)
       const confidence = data.confidence
+      const relatedNews = data.related_news || []
+      const verificationNote = data.verification_note
+      const trustedSourcesFound = data.trusted_sources_found || 0
       
       let verdict = ''
       if (confidence >= 80) {
@@ -45,7 +60,14 @@ function App() {
         verdict = `ระดับความน่าเชื่อถือต่ำ (${confidence}%)`
       }
       
-      setResult({ isAnalyzing: false, verdict, confidence })
+      setResult({ 
+        isAnalyzing: false, 
+        verdict, 
+        confidence,
+        relatedNews,
+        verificationNote,
+        trustedSourcesFound
+      })
     } catch (error) {
       console.error('Error:', error)
       setResult({ 
@@ -134,6 +156,41 @@ function App() {
                     </div>
                   </div>
                 )}
+
+          {result.relatedNews && result.relatedNews.length > 0 && (
+            <div className="related-news-section">
+              <h3>📰 ข่าวที่เกี่ยวข้องจากแหล่งที่น่าเชื่อถือ</h3>
+              {result.verificationNote && (
+                <p className="verification-note">
+                  ℹ️ {result.verificationNote}
+                </p>
+              )}
+              <div className="related-news-grid">
+                {result.relatedNews.map((news, index) => (
+                  <div key={index} className="news-card">
+                    <div className="news-header">
+                      <span className="news-source">
+                        🌐 {news.source}
+                        {news.is_trusted && <span className="trusted-badge">✓ เชื่อถือได้</span>}
+                      </span>
+                      <span className="news-similarity">
+                        {news.similarity}% ความคล้าย
+                      </span>
+                    </div>
+                    <h4 className="news-title">{news.title}</h4>
+                    <a 
+                      href={news.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="news-link"
+                    >
+                      📖 อ่านบทความเต็ม →
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
               </div>
               {result.confidence !== undefined && (
                 <div className="confidence-info">
