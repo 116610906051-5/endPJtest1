@@ -40,9 +40,13 @@ TRUSTED_NEWS_SOURCES = [
     "dailynews.co.th"
 ]
 
-# NewsAPI Configuration
-NEWS_API_KEY = "277729d09fc640549010e57ecb99c09d"
-NEWS_API_BASE_URL = "https://newsapi.org/v2/everything"
+# NewsAPI Configuration (เก่า - ไม่มีข่าวไทย)
+# NEWS_API_KEY = "277729d09fc640549010e57ecb99c09d"
+# NEWS_API_BASE_URL = "https://newsapi.org/v2/everything"
+
+# SearchAPI Configuration (ใช้แทน NewsAPI - มีข่าวไทยเยอะกว่า)
+SEARCHAPI_KEY = "jkiyja5rtFwfdQYjXh5nLLjC"
+SEARCHAPI_URL = "https://www.searchapi.io/api/v1/search"
 
 class News(BaseModel):
     text: str
@@ -98,59 +102,65 @@ class RelatedNews(BaseModel):
 
 
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
-    """ค้นหาข่าวไทยทั่วไปจาก NewsAPI แล้วกรองด้วย similarity"""
+    """ค้นหาข่าวที่เกี่ยวข้องจาก SearchAPI (Google Search)"""
     try:
         # ตรวจสอบความยาวข้อความก่อน
         if len(query.strip()) < 10:
             print(f"⚠️ Text too short, skipping")
             return []
         
-        print(f"🔍 Fetching latest Thai news...")
-        
-        # ค้นหาข่าวไทยทั่วไป (top headlines) เพื่อให้มีข่าวมากที่สุด
-        params = {
-            "country": "th",  # ข่าวประเทศไทย
-            "pageSize": 20,   # ขอมาเยอะเพื่อให้มีตัวเลือกในการกรอง
-            "apiKey": NEWS_API_KEY
-        }
-        
-        response = requests.get("https://newsapi.org/v2/top-headlines", params=params, timeout=5)
-        
-        if response.status_code != 200:
-            print(f"❌ NewsAPI error: {response.status_code}")
+        # สกัด keywords
+        keywords = extract_keywords(query)
+        if len(keywords) < 2:
+            print(f"⚠️ Not enough keywords")
             return []
         
-        data = response.json()
-        total_results = data.get('totalResults', 0)
-        print(f"📰 Found {total_results} Thai articles")
+        search_query = " ".join(keywords[:3])
+        print(f"🔍 SearchAPI: {search_query}")
         
-        if total_results == 0 or not data.get("articles"):
-            print(f"⚠️ No Thai news available")
-            return []
+        # ค้นหาจากแหล่งข่าวไทย
+        thai_sites = ["thairath.co.th", "manager.co.th", "khaosod.co.th"]
+        all_results = []
         
-        related_news = []
-        for article in data["articles"]:
-            source_url = article.get("url", "")
-            source_domain = ""
+        for site in thai_sites:
+            params = {
+                "engine": "google",
+                "q": f"{search_query} site:{site}",
+                "api_key": SEARCHAPI_KEY
+            }
             
-            if source_url:
-                try:
-                    from urllib.parse import urlparse
-                    parsed = urlparse(source_url)
-                    source_domain = parsed.netloc.replace("www.", "")
-                except:
-                    source_domain = article.get("source", {}).get("name", "unknown")
-            
-            related_news.append({
-                "title": article.get("title", ""),
-                "source": source_domain or article.get("source", {}).get("name", "unknown"),
-                "url": article.get("url", ""),
-                "content": article.get("description", "") or article.get("content", "") or article.get("title", ""),
-                "publishedAt": article.get("publishedAt", "")
-            })
+            try:
+                response = requests.get(SEARCHAPI_URL, params=params, timeout=10)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    organic = data.get('organic_results', [])
+                    
+                    print(f"  📰 {site}: {len(organic)} articles")
+                    
+                    for result in organic[:3]:  # เอา 3 ข่าวแรกจากแต่ละเว็บ
+                        all_results.append({
+                            "title": result.get('title', ''),
+                            "source": site,
+                            "url": result.get('link', ''),
+                            "content": result.get('snippet', '') or result.get('title', ''),
+                            "publishedAt": ""
+                        })
+                        
+                elif response.status_code == 429:
+                    print(f"  ⚠️ SearchAPI rate limit reached")
+                    break
+                    
+            except Exception as e:
+                print(f"  ⚠️ Error with {site}: {e}")
+                continue
         
-        print(f"✅ Collected {len(related_news)} articles for similarity check")
-        return related_news
+        print(f"✅ Collected {len(all_results)} articles")
+        return all_results[:10]  # ส่งไปเช็ค similarity
+        
+    except Exception as e:
+        print(f"❌ Search error: {e}")
+        return []
         
         if data.get("status") == "ok" and data.get("articles"):
             for article in data["articles"][:max_results]:
