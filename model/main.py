@@ -234,8 +234,8 @@ def adjust_confidence_with_related_news(
         # คำนวณความคล้ายคลึง
         similarity = calculate_text_similarity(user_text, news.get('content', news.get('title', '')))
         
-        # กรองข่าวที่ similarity ต่ำมาก (< 3%) ออก
-        if similarity < 0.03:
+        # กรองข่าวที่ similarity ต่ำมาก (< 10%) ออก
+        if similarity < 0.10:
             print(f"⚠️ Skipping low similarity article: {news.get('title', '')[:50]}... (similarity: {round(similarity * 100, 1)}%)")
             continue
         
