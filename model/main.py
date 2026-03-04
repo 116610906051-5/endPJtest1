@@ -361,20 +361,29 @@ def predict(news: News):
     if news.check_related:
         related_news = search_related_news(news.text)
         
-        if related_news:
+        if related_news and len(related_news) > 0:
             adjusted_confidence, related_items = adjust_confidence_with_related_news(
                 confidence_percent,
                 related_news,
                 news.text
             )
             
-            response["confidence"] = round(adjusted_confidence, 1)
-            response["original_confidence"] = confidence_percent
-            response["confidence_adjustment"] = round(adjusted_confidence - confidence_percent, 1)
-            response["related_news"] = related_items
-            response["verification_note"] = (
-                f"พบข่าวที่เกี่ยวข้อง {len(related_items)} รายการ "
-                f"จากแหล่งที่น่าเชื่อถือ {sum(1 for r in related_items if r['is_trusted'])} แหล่ง"
-            )
+            if len(related_items) > 0:
+                response["confidence"] = round(adjusted_confidence, 1)
+                response["original_confidence"] = confidence_percent
+                response["confidence_adjustment"] = round(adjusted_confidence - confidence_percent, 1)
+                response["related_news"] = related_items
+                response["verification_note"] = (
+                    f"พบข่าวที่เกี่ยวข้อง {len(related_items)} รายการ "
+                    f"จากแหล่งที่น่าเชื่อถือ {sum(1 for r in related_items if r['is_trusted'])} แหล่ง"
+                )
+            else:
+                # ไม่มีข่าวที่ similarity ผ่าน
+                response["related_news"] = []
+                response["verification_note"] = "ไม่พบข่าวที่เกี่ยวข้องในช่วงเวลานี้ (NewsAPI Free มีข้อจำกัดข่าวไทย)"
+        else:
+            # ไม่มีข่าวเลยจาก NewsAPI
+            response["related_news"] = []
+            response["verification_note"] = "ไม่สามารถตรวจสอบข่าวที่เกี่ยวข้องได้ในขณะนี้ (NewsAPI Free ไม่มีข่าวไทย)"
     
     return response
