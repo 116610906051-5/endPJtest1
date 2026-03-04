@@ -56,17 +56,25 @@ class RelatedNews(BaseModel):
     is_trusted: bool
 
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
-    """ค้นหาข่าวที่เกี่ยวข้องจาก NewsAPI"""
+    """ค้นหาข่าวที่เกี่ยวข้องจาก NewsAPI (แหล่งข่าวไทย)"""
     try:
         # สกัด keywords สำหรับค้นหา
         keywords = extract_keywords(query)
-        search_query = " ".join(keywords[:3])  # ใช้ 3 keywords แรก
+        search_query_th = " ".join(keywords[:3])  # ใช้ 3 keywords แรก
         
-        # เรียก NewsAPI
+        # ใช้คำค้นหาทั่วไปเกี่ยวกับประเทศไทยแทน (NewsAPI รองรับภาษาอังกฤษดีกว่า)
+        search_query = "Thailand news"
+        
+        print(f"🔍 Searching NewsAPI for: {search_query} (original: {search_query_th})")
+        
+        # แหล่งข่าวไทยที่ NewsAPI รองรับ
+        thai_sources = "thairath.co.th,manager.co.th,bangkokpost.com,nationthailand.com"
+        
+        # เรียก NewsAPI แบบระบุ sources
         params = {
             "q": search_query,
-            "language": "th",  # ภาษาไทย
-            "sortBy": "relevancy",
+            "domains": thai_sources,
+            "sortBy": "publishedAt",  # เรียงตามวันที่เผยแพร่ล่าสุด
             "pageSize": max_results,
             "apiKey": NEWS_API_KEY
         }
@@ -74,11 +82,13 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
         response = requests.get(NEWS_API_BASE_URL, params=params, timeout=5)
         
         if response.status_code != 200:
-            print(f"NewsAPI error: {response.status_code}")
+            print(f"❌ NewsAPI error: {response.status_code}")
             return []
         
         data = response.json()
         related_news = []
+        
+        print(f"📰 NewsAPI status: {data.get('status')}, Total: {data.get('totalResults', 0)}")
         
         if data.get("status") == "ok" and data.get("articles"):
             for article in data["articles"][:max_results]:
@@ -100,6 +110,8 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
                     "url": article.get("url", ""),
                     "content": article.get("description", "") or article.get("content", "")
                 })
+            
+            print(f"✅ Found {len(related_news)} related articles")
         
         return related_news
         
