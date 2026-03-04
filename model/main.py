@@ -100,21 +100,18 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
     try:
         # สกัด keywords สำหรับค้นหา
         keywords = extract_keywords(query)
-        search_query_th = " ".join(keywords[:3])  # ใช้ 3 keywords แรก
+        search_query_th = " ".join(keywords[:5])  # ใช้ 5 keywords แรก
         
-        # ใช้คำค้นหาทั่วไปเกี่ยวกับประเทศไทยแทน (NewsAPI รองรับภาษาอังกฤษดีกว่า)
-        search_query = "Thailand news"
-        
-        print(f"🔍 Searching NewsAPI for: {search_query} (original: {search_query_th})")
+        print(f"🔍 Searching NewsAPI with keywords: {search_query_th}")
         
         # แหล่งข่าวไทยที่ NewsAPI รองรับ
         thai_sources = "thairath.co.th,manager.co.th,bangkokpost.com,nationthailand.com"
         
-        # เรียก NewsAPI แบบระบุ sources
+        # ลองค้นหาด้วย keywords ภาษาไทยก่อน
         params = {
-            "q": search_query,
+            "q": search_query_th,
             "domains": thai_sources,
-            "sortBy": "publishedAt",  # เรียงตามวันที่เผยแพร่ล่าสุด
+            "sortBy": "relevancy",  # เรียงตามความเกี่ยวข้อง
             "pageSize": max_results,
             "apiKey": NEWS_API_KEY
         }
@@ -128,7 +125,20 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
         data = response.json()
         related_news = []
         
-        print(f"📰 NewsAPI status: {data.get('status')}, Total: {data.get('totalResults', 0)}")
+        total_results = data.get('totalResults', 0)
+        print(f"📰 NewsAPI found: {total_results} articles")
+        
+        # ถ้าไม่มีผลลัพธ์ ลองค้นหาด้วย "Thailand" เป็นทางเลือกสุดท้าย
+        if total_results == 0:
+            print(f"⚠️ No results with specific keywords, trying general search...")
+            params["q"] = "Thailand"
+            params["sortBy"] = "publishedAt"
+            response = requests.get(NEWS_API_BASE_URL, params=params, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                total_results = data.get('totalResults', 0)
+                print(f"📰 General search found: {total_results} articles")
         
         if data.get("status") == "ok" and data.get("articles"):
             for article in data["articles"][:max_results]:
@@ -148,10 +158,11 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
                     "title": article.get("title", ""),
                     "source": source_domain or article.get("source", {}).get("name", "unknown"),
                     "url": article.get("url", ""),
-                    "content": article.get("description", "") or article.get("content", "")
+                    "content": article.get("description", "") or article.get("content", ""),
+                    "publishedAt": article.get("publishedAt", "")
                 })
             
-            print(f"✅ Found {len(related_news)} related articles")
+            print(f"✅ Returning {len(related_news)} related articles")
         
         return related_news
         
@@ -162,13 +173,95 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
         print(f"Error searching news: {e}")
         return []
 
-def extract_keywords(text: str, max_keywords: int = 5) -> List[str]:
-    """สกัดคำสำคัญจากข้อความ"""
-    # ใช้ pythainlp ถ้ามี หรือใช้ regex เบื้องต้น
-    words = re.findall(r'\b\w+\b', text)
-    # กรองคำที่ยาวกว่า 2 ตัวอักษร
-    keywords = [w for w in words if len(w) > 2][:max_keywords]
-    return keywords
+def extract_keywords(text: str, max_keywords: int = 10) -> List[str]:
+    """สกัดคำสำคัญจากข้อความภาษาไทย"""
+    try:
+        from pythainlp.tokenize import word_tokenize
+        from pythainlp.corpus import thai_stopwords
+        
+        # Tokenize ภาษาไทย
+        words = word_tokenize(text, engine='newmm')
+        
+        # โหลด stopwords
+        stopwords = thai_stopwords()
+        
+        # กรองคำที่ไม่ใช่ stopwords และยาวกว่า 1 ตัวอักษร
+        keywords = [w for w in words if w not in stopwords and len(w) > 1 and not w.isspace()]
+        
+        # เอาเฉพาะคำที่มีความหมาย (กรองเครื่องหมายออก)
+        meaningful_keywords = [w for w in keywords if any(c.isalnum() for c in w)]
+        
+    verify_with_related_news(
+    user_text: str,
+    related_news: List[dict],
+    model_confidence: float,
+    model_label: str
+) -> dict:
+    """ตรวจสอบความน่าเชื่อถือด้วยข่าวที่เกี่ยวข้อง"""
+    
+    if not related_news:
+        return {
+            "final_confidence": model_confidence,
+            "final_label": model_label,
+            "related_articles": [],
+            "verification_note": "ไม่พบข่าวที่เกี่ยวข้องจากแหล่งข่าวที่น่าเชื่อถือในขณะนี้"
+        }
+    
+    related_items = []
+    max_similarity = 0.0
+    trusted_count = 0
+    
+    for news in related_news:
+        # ตรวจสอบว่าเป็นแหล่งที่น่าเชื่อถือหรือไม่
+        is_trusted = any(source in news.get('source', '') for source in TRUSTED_NEWS_SOURCES)
+        
+        # คำนวณความคล้ายคลึง
+        similarity = calculate_text_similarity(user_text, news.get('content', news.get('title', '')))
+        
+        if similarity > max_similarity:
+            max_similarity = similarity
+        
+        if is_trusted:
+            trusted_count += 1
+        
+        related_items.append({
+            "title": news.get('title', '')[:150],
+            "source": news.get('source', 'unknown'),
+            "url": news.get('url', ''),
+            "similarity": round(similarity * 100, 1),
+            "is_trusted": is_trusted,
+            "publishedAt": news.get('publishedAt', '')
+        })
+    
+    # ปรับ confidence ถ้ามีแหล่งที่เชื่อถือได้
+    adjustment = 0.0
+    final_confidence = model_confidence
+    final_label = model_label
+    
+    if trusted_count > 0:
+        # มีแหล่งข่าวที่เชื่อถือได้ -> เพิ่มความมั่นใจในผลลัพธ์
+        if model_label == "ข่าวจริง":
+            adjustment = min(trusted_count * 5, 10)
+            final_confidence = min(model_confidence + adjustment, 99.0)
+        elif model_confidence < 30:
+            if trusted_count >= 3:
+                final_confidence = 60.0
+                final_label = "ไม่แน่ใจ - พบแหล่งข่าวที่เชื่อถือได้"
+    
+    verification_note = (
+        f"พบข่าวที่เกี่ยวข้อง {len(related_items)} รายการ "
+        f"จากแหล่งที่น่าเชื่อถือ {trusted_count} แหล่ง "
+        f"(ความคล้ายสูงสุด: {round(max_similarity * 100, 1)}%)"
+    )
+    
+    return {
+        "final_confidence": round(final_confidence, 1),
+        "final_label": final_label,
+        "confidence_adjustment": round(adjustment, 1),
+        "related_articles": related_items,
+        "verification_note": verification_note,
+        "trusted_sources_count": trusted_count
+    }
 
 def calculate_text_similarity(text1: str, text2: str) -> float:
     """คำนวณความคล้ายคลึงระหว่างข้อความ 2 ข้อความ"""
