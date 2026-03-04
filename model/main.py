@@ -191,77 +191,13 @@ def extract_keywords(text: str, max_keywords: int = 10) -> List[str]:
         # เอาเฉพาะคำที่มีความหมาย (กรองเครื่องหมายออก)
         meaningful_keywords = [w for w in keywords if any(c.isalnum() for c in w)]
         
-    verify_with_related_news(
-    user_text: str,
-    related_news: List[dict],
-    model_confidence: float,
-    model_label: str
-) -> dict:
-    """ตรวจสอบความน่าเชื่อถือด้วยข่าวที่เกี่ยวข้อง"""
-    
-    if not related_news:
-        return {
-            "final_confidence": model_confidence,
-            "final_label": model_label,
-            "related_articles": [],
-            "verification_note": "ไม่พบข่าวที่เกี่ยวข้องจากแหล่งข่าวที่น่าเชื่อถือในขณะนี้"
-        }
-    
-    related_items = []
-    max_similarity = 0.0
-    trusted_count = 0
-    
-    for news in related_news:
-        # ตรวจสอบว่าเป็นแหล่งที่น่าเชื่อถือหรือไม่
-        is_trusted = any(source in news.get('source', '') for source in TRUSTED_NEWS_SOURCES)
-        
-        # คำนวณความคล้ายคลึง
-        similarity = calculate_text_similarity(user_text, news.get('content', news.get('title', '')))
-        
-        if similarity > max_similarity:
-            max_similarity = similarity
-        
-        if is_trusted:
-            trusted_count += 1
-        
-        related_items.append({
-            "title": news.get('title', '')[:150],
-            "source": news.get('source', 'unknown'),
-            "url": news.get('url', ''),
-            "similarity": round(similarity * 100, 1),
-            "is_trusted": is_trusted,
-            "publishedAt": news.get('publishedAt', '')
-        })
-    
-    # ปรับ confidence ถ้ามีแหล่งที่เชื่อถือได้
-    adjustment = 0.0
-    final_confidence = model_confidence
-    final_label = model_label
-    
-    if trusted_count > 0:
-        # มีแหล่งข่าวที่เชื่อถือได้ -> เพิ่มความมั่นใจในผลลัพธ์
-        if model_label == "ข่าวจริง":
-            adjustment = min(trusted_count * 5, 10)
-            final_confidence = min(model_confidence + adjustment, 99.0)
-        elif model_confidence < 30:
-            if trusted_count >= 3:
-                final_confidence = 60.0
-                final_label = "ไม่แน่ใจ - พบแหล่งข่าวที่เชื่อถือได้"
-    
-    verification_note = (
-        f"พบข่าวที่เกี่ยวข้อง {len(related_items)} รายการ "
-        f"จากแหล่งที่น่าเชื่อถือ {trusted_count} แหล่ง "
-        f"(ความคล้ายสูงสุด: {round(max_similarity * 100, 1)}%)"
-    )
-    
-    return {
-        "final_confidence": round(final_confidence, 1),
-        "final_label": final_label,
-        "confidence_adjustment": round(adjustment, 1),
-        "related_articles": related_items,
-        "verification_note": verification_note,
-        "trusted_sources_count": trusted_count
-    }
+        return meaningful_keywords[:max_keywords]
+    except Exception as e:
+        print(f"⚠️ Keyword extraction error: {e}, using simple method")
+        # Fallback: ใช้ regex เบื้องต้น
+        words = re.findall(r'\b\w+\b', text)
+        keywords = [w for w in words if len(w) > 2][:max_keywords]
+        return keywords
 
 def calculate_text_similarity(text1: str, text2: str) -> float:
     """คำนวณความคล้ายคลึงระหว่างข้อความ 2 ข้อความ"""
