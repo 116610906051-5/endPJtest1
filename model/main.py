@@ -98,8 +98,19 @@ class RelatedNews(BaseModel):
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
     """ค้นหาข่าวที่เกี่ยวข้องจาก NewsAPI (แหล่งข่าวไทย)"""
     try:
+        # ตรวจสอบความยาวข้อความก่อน
+        if len(query.strip()) < 10:
+            print(f"⚠️ Text too short ({len(query)} chars), skipping news search")
+            return []
+        
         # สกัด keywords สำหรับค้นหา
         keywords = extract_keywords(query)
+        
+        # ถ้า keywords น้อยเกินไป (น้อยกว่า 2 คำ) ไม่ค้นหา
+        if len(keywords) < 2:
+            print(f"⚠️ Not enough keywords ({len(keywords)}), skipping news search")
+            return []
+        
         search_query_th = " ".join(keywords[:5])  # ใช้ 5 keywords แรก
         
         print(f"🔍 Searching NewsAPI with keywords: {search_query_th}")
@@ -107,7 +118,7 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
         # แหล่งข่าวไทยที่ NewsAPI รองรับ
         thai_sources = "thairath.co.th,manager.co.th,bangkokpost.com,nationthailand.com"
         
-        # ลองค้นหาด้วย keywords ภาษาไทยก่อน
+        # ค้นหาด้วย keywords ภาษาไทย
         params = {
             "q": search_query_th,
             "domains": thai_sources,
@@ -128,17 +139,10 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
         total_results = data.get('totalResults', 0)
         print(f"📰 NewsAPI found: {total_results} articles")
         
-        # ถ้าไม่มีผลลัพธ์ ลองค้นหาด้วย "Thailand" เป็นทางเลือกสุดท้าย
+        # ถ้าไม่มีผลลัพธ์เลย ไม่ต้อง fallback ไปค้นหาทั่วไป
         if total_results == 0:
-            print(f"⚠️ No results with specific keywords, trying general search...")
-            params["q"] = "Thailand"
-            params["sortBy"] = "publishedAt"
-            response = requests.get(NEWS_API_BASE_URL, params=params, timeout=5)
-            
-            if response.status_code == 200:
-                data = response.json()
-                total_results = data.get('totalResults', 0)
-                print(f"📰 General search found: {total_results} articles")
+            print(f"⚠️ No relevant news found for these keywords")
+            return []
         
         if data.get("status") == "ok" and data.get("articles"):
             for article in data["articles"][:max_results]:
@@ -230,6 +234,11 @@ def adjust_confidence_with_related_news(
         # คำนวณความคล้ายคลึง
         similarity = calculate_text_similarity(user_text, news.get('content', news.get('title', '')))
         
+        # กรองข่าวที่ similarity ต่ำมาก (< 3%) ออก
+        if similarity < 0.03:
+            print(f"⚠️ Skipping low similarity article: {news.get('title', '')[:50]}... (similarity: {round(similarity * 100, 1)}%)")
+            continue
+        
         if similarity > max_similarity:
             max_similarity = similarity
         
@@ -237,16 +246,22 @@ def adjust_confidence_with_related_news(
             trusted_count += 1
         
         related_items.append({
-            "title": news.get('title', '')[:100],
+            "title": news.get('title', '')[:150],
             "source": news.get('source', 'unknown'),
             "url": news.get('url', ''),
             "similarity": round(similarity * 100, 1),
-            "is_trusted": is_trusted
+            "is_trusted": is_trusted,
+            "publishedAt": news.get('publishedAt', '')
         })
     
     # ปรับ confidence
     # ถ้ามีข่าวจากแหล่งที่น่าเชื่อถือและคล้ายคลึงกัน -> เพิ่ม confidence
     adjustment = 0.0
+    
+    # ถ้าไม่มีข่าวที่เกี่ยวข้องหลังกรอง ให้ return ว่าง
+    if len(related_items) == 0:
+        print(f"⚠️ All articles filtered out due to low similarity")
+        return original_confidence, []
     
     if trusted_count > 0 and max_similarity > 0.3:
         # เพิ่ม confidence ตามจำนวนแหล่งที่เชื่อถือและความคล้ายคลึง
