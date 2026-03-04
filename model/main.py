@@ -103,57 +103,91 @@ def search_google_news(query: str, max_results: int = 5) -> List[dict]:
         # สกัด keywords
         keywords = extract_keywords(query)
         if len(keywords) < 2:
+            print(f"⚠️ Too few keywords for Google search")
             return []
         
         search_query = " ".join(keywords[:5])
         print(f"🔍 Searching Google News with: {search_query}")
         
-        # Search ใน Google โดยเฉพาะจากเว็บข่าวไทย
-        search_url = f"https://www.google.com/search?q={quote_plus(search_query)}+site:thairath.co.th OR site:manager.co.th OR site:bangkokpost.com&num=10"
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        response = requests.get(search_url, headers=headers, timeout=10)
-        
-        if response.status_code != 200:
-            print(f"❌ Google search error: {response.status_code}")
-            return []
-        
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
+        # ลองหลายแหล่งข่าว
+        sources = ["thairath.co.th", "manager.co.th", "bangkokpost.com", "nationthailand.com", "khaosod.co.th"]
         results = []
-        # ดึงผลลัพธ์การค้นหาจาก Google
-        for g in soup.find_all('div', class_='g')[:max_results]:
+        
+        for source in sources:
             try:
-                title_elem = g.find('h3')
-                link_elem = g.find('a')
+                search_url = f"https://www.google.com/search?q={quote_plus(search_query)}+site:{source}&num=5"
                 
-                if title_elem and link_elem:
-                    title = title_elem.get_text()
-                    url = link_elem.get('href')
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'th,en;q=0.9'
+                }
+                
+                response = requests.get(search_url, headers=headers, timeout=10)
+                
+                if response.status_code != 200:
+                    print(f"⚠️ Google search error for {source}: {response.status_code}")
+                    continue
+                
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # ลองหลายวิธีในการ parse
+                # วิธีที่ 1: ใช้ class 'g'
+                search_results = soup.find_all('div', class_='g')
+                
+                # วิธีที่ 2: ถ้าไม่เจอ ลองหา div ที่มี h3
+                if not search_results:
+                    search_results = soup.find_all('div', attrs={'data-sokoban-container': True})
+                
+                for g in search_results[:2]:  # เอาแค่ 2 ข่าวต่อแหล่ง
+                    try:
+                        # หา title
+                        title_elem = g.find('h3')
+                        if not title_elem:
+                            continue
+                        
+                        # หา link
+                        link_elem = g.find('a', href=True)
+                        if not link_elem:
+                            continue
+                        
+                        title = title_elem.get_text(strip=True)
+                        url = link_elem.get('href')
+                        
+                        # กรอง url ที่ไม่ใช่ข่าว
+                        if not url or url.startswith('/search') or 'google.com' in url:
+                            continue
+                        
+                        # ดึง snippet/description
+                        snippet_elem = g.find('div', class_=['VwiC3b', 'yXK7lf'])
+                        content = snippet_elem.get_text(strip=True) if snippet_elem else title
+                        
+                        results.append({
+                            'title': title,
+                            'source': source,
+                            'url': url,
+                            'content': content,
+                            'publishedAt': ''
+                        })
+                        
+                        print(f"  ✅ Found: {title[:50]}...")
+                        
+                    except Exception as e:
+                        print(f"  ⚠️ Parse error: {e}")
+                        continue
+                
+                if len(results) >= max_results:
+                    break
                     
-                    # ดึง source domain
-                    from urllib.parse import urlparse
-                    source_domain = urlparse(url).netloc.replace('www.', '')
-                    
-                    results.append({
-                        'title': title,
-                        'source': source_domain,
-                        'url': url,
-                        'content': title,  # ใช้ title เป็น content ชั่วคราว
-                        'publishedAt': ''
-                    })
-            except:
+            except Exception as e:
+                print(f"⚠️ Error searching {source}: {e}")
                 continue
         
-        print(f"✅ Google found {len(results)} articles")
-        return results
+        print(f"✅ Google found total {len(results)} articles")
+        return results[:max_results]
         
     except Exception as e:
-        print(f"❌ Google search error: {e}")
+        print(f"❌ Google search critical error: {e}")
         return []
 
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
@@ -296,10 +330,12 @@ def adjust_confidence_with_related_news(
         # คำนวณความคล้ายคลึง
         similarity = calculate_text_similarity(user_text, news.get('content', news.get('title', '')))
         
-        # กรองข่าวที่ similarity ต่ำมาก (< 10%) ออก
-        if similarity < 0.10:
+        # กรองข่าวที่ similarity ต่ำมาก (< 5%) ออก
+        if similarity < 0.05:
             print(f"⚠️ Skipping low similarity article: {news.get('title', '')[:50]}... (similarity: {round(similarity * 100, 1)}%)")
             continue
+        
+        print(f"✅ Found relevant article: {news.get('title', '')[:50]}... (similarity: {round(similarity * 100, 1)}%)")
         
         if similarity > max_similarity:
             max_similarity = similarity
