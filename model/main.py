@@ -98,86 +98,59 @@ class RelatedNews(BaseModel):
 
 
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
-    """ค้นหาข่าวที่เกี่ยวข้องจาก NewsAPI (แหล่งข่าวไทย)"""
+    """ค้นหาข่าวไทยทั่วไปจาก NewsAPI แล้วกรองด้วย similarity"""
     try:
         # ตรวจสอบความยาวข้อความก่อน
         if len(query.strip()) < 10:
-            print(f"⚠️ Text too short ({len(query)} chars), skipping news search")
+            print(f"⚠️ Text too short, skipping")
             return []
         
-        # สกัด keywords สำหรับค้นหา
-        keywords = extract_keywords(query)
+        print(f"🔍 Fetching latest Thai news...")
         
-        # ถ้า keywords น้อยเกินไป (น้อยกว่า 2 คำ) ไม่ค้นหา
-        if len(keywords) < 2:
-            print(f"⚠️ Not enough keywords ({len(keywords)}), skipping news search")
+        # ค้นหาข่าวไทยทั่วไป (top headlines) เพื่อให้มีข่าวมากที่สุด
+        params = {
+            "country": "th",  # ข่าวประเทศไทย
+            "pageSize": 20,   # ขอมาเยอะเพื่อให้มีตัวเลือกในการกรอง
+            "apiKey": NEWS_API_KEY
+        }
+        
+        response = requests.get("https://newsapi.org/v2/top-headlines", params=params, timeout=5)
+        
+        if response.status_code != 200:
+            print(f"❌ NewsAPI error: {response.status_code}")
+            return []
+        
+        data = response.json()
+        total_results = data.get('totalResults', 0)
+        print(f"📰 Found {total_results} Thai articles")
+        
+        if total_results == 0 or not data.get("articles"):
+            print(f"⚠️ No Thai news available")
             return []
         
         related_news = []
+        for article in data["articles"]:
+            source_url = article.get("url", "")
+            source_domain = ""
+            
+            if source_url:
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(source_url)
+                    source_domain = parsed.netloc.replace("www.", "")
+                except:
+                    source_domain = article.get("source", {}).get("name", "unknown")
+            
+            related_news.append({
+                "title": article.get("title", ""),
+                "source": source_domain or article.get("source", {}).get("name", "unknown"),
+                "url": article.get("url", ""),
+                "content": article.get("description", "") or article.get("content", "") or article.get("title", ""),
+                "publishedAt": article.get("publishedAt", "")
+            })
         
-        # ลองค้นหาหลายรูปแบบ
-        search_attempts = [
-            (" ".join(keywords[:3]), "ค้นหาด้วย 3 keywords แรก"),  # ลองแบบเจาะจง
-            (" ".join(keywords[:5]), "ค้นหาด้วย 5 keywords"),      # ปกติ
-            (keywords[0] if keywords else "", "ค้นหาด้วย keyword เดียว")  # กว้างที่สุด
-        ]
-        
-        for search_query, description in search_attempts:
-            if not search_query or len(search_query) < 2:
-                continue
-                
-            print(f"🔍 {description}: {search_query}")
-            
-            # แหล่งข่าวไทยที่ NewsAPI รองรับ
-            params = {
-                "q": search_query,
-                "language": "th",  # ระบุภาษาไทย
-                "sortBy": "relevancy",
-                "pageSize": 10,  # ขอมากหน่อยเพื่อกรอง
-                "apiKey": NEWS_API_KEY
-            }
-            
-            response = requests.get(NEWS_API_BASE_URL, params=params, timeout=5)
-            
-            if response.status_code != 200:
-                print(f"⚠️ NewsAPI error: {response.status_code}")
-                continue
-            
-            data = response.json()
-            total_results = data.get('totalResults', 0)
-            print(f"  📰 Found: {total_results} articles")
-            
-            if total_results > 0 and data.get("status") == "ok" and data.get("articles"):
-                # เจอแล้ว ใช้ผลลัพธ์นี้
-                for article in data["articles"]:
-                    source_url = article.get("url", "")
-                    source_domain = ""
-                    
-                    if source_url:
-                        try:
-                            from urllib.parse import urlparse
-                            parsed = urlparse(source_url)
-                            source_domain = parsed.netloc.replace("www.", "")
-                        except:
-                            source_domain = article.get("source", {}).get("name", "unknown")
-                    
-                    related_news.append({
-                        "title": article.get("title", ""),
-                        "source": source_domain or article.get("source", {}).get("name", "unknown"),
-                        "url": article.get("url", ""),
-                        "content": article.get("description", "") or article.get("content", ""),
-                        "publishedAt": article.get("publishedAt", "")
-                    })
-                
-                print(f"  ✅ Collected {len(related_news)} articles")
-                break  # เจอแล้วไม่ต้องลองต่อ
-        
-        if len(related_news) == 0:
-            print(f"⚠️ No news found after all attempts")
-            return []
-        
-        print(f"✅ Returning {len(related_news)} articles for similarity check")
-        return related_news[:10]  # ส่งไปเช็ค similarity ก่อน
+        print(f"✅ Collected {len(related_news)} articles for similarity check")
+        return related_news
         
         if data.get("status") == "ok" and data.get("articles"):
             for article in data["articles"][:max_results]:
