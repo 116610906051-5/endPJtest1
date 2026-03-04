@@ -95,100 +95,7 @@ class RelatedNews(BaseModel):
     similarity: float
     is_trusted: bool
 
-def search_google_news(query: str, max_results: int = 5) -> List[dict]:
-    """ค้นหาข่าวจาก Google โดยตรง (fallback สำหรับเมื่อ NewsAPI ไม่เจอ)"""
-    try:
-        from urllib.parse import quote_plus
-        
-        # สกัด keywords
-        keywords = extract_keywords(query)
-        if len(keywords) < 2:
-            print(f"⚠️ Too few keywords for Google search")
-            return []
-        
-        search_query = " ".join(keywords[:5])
-        print(f"🔍 Searching Google News with: {search_query}")
-        
-        # ลองหลายแหล่งข่าว
-        sources = ["thairath.co.th", "manager.co.th", "bangkokpost.com", "nationthailand.com", "khaosod.co.th"]
-        results = []
-        
-        for source in sources:
-            try:
-                search_url = f"https://www.google.com/search?q={quote_plus(search_query)}+site:{source}&num=5"
-                
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept-Language': 'th,en;q=0.9'
-                }
-                
-                response = requests.get(search_url, headers=headers, timeout=10)
-                
-                if response.status_code != 200:
-                    print(f"⚠️ Google search error for {source}: {response.status_code}")
-                    continue
-                
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # ลองหลายวิธีในการ parse
-                # วิธีที่ 1: ใช้ class 'g'
-                search_results = soup.find_all('div', class_='g')
-                
-                # วิธีที่ 2: ถ้าไม่เจอ ลองหา div ที่มี h3
-                if not search_results:
-                    search_results = soup.find_all('div', attrs={'data-sokoban-container': True})
-                
-                for g in search_results[:2]:  # เอาแค่ 2 ข่าวต่อแหล่ง
-                    try:
-                        # หา title
-                        title_elem = g.find('h3')
-                        if not title_elem:
-                            continue
-                        
-                        # หา link
-                        link_elem = g.find('a', href=True)
-                        if not link_elem:
-                            continue
-                        
-                        title = title_elem.get_text(strip=True)
-                        url = link_elem.get('href')
-                        
-                        # กรอง url ที่ไม่ใช่ข่าว
-                        if not url or url.startswith('/search') or 'google.com' in url:
-                            continue
-                        
-                        # ดึง snippet/description
-                        snippet_elem = g.find('div', class_=['VwiC3b', 'yXK7lf'])
-                        content = snippet_elem.get_text(strip=True) if snippet_elem else title
-                        
-                        results.append({
-                            'title': title,
-                            'source': source,
-                            'url': url,
-                            'content': content,
-                            'publishedAt': ''
-                        })
-                        
-                        print(f"  ✅ Found: {title[:50]}...")
-                        
-                    except Exception as e:
-                        print(f"  ⚠️ Parse error: {e}")
-                        continue
-                
-                if len(results) >= max_results:
-                    break
-                    
-            except Exception as e:
-                print(f"⚠️ Error searching {source}: {e}")
-                continue
-        
-        print(f"✅ Google found total {len(results)} articles")
-        return results[:max_results]
-        
-    except Exception as e:
-        print(f"❌ Google search critical error: {e}")
-        return []
+
 
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
     """ค้นหาข่าวที่เกี่ยวข้องจาก NewsAPI (แหล่งข่าวไทย)"""
@@ -206,39 +113,71 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
             print(f"⚠️ Not enough keywords ({len(keywords)}), skipping news search")
             return []
         
-        search_query_th = " ".join(keywords[:5])  # ใช้ 5 keywords แรก
-        
-        print(f"🔍 Searching NewsAPI with keywords: {search_query_th}")
-        
-        # แหล่งข่าวไทยที่ NewsAPI รองรับ
-        thai_sources = "thairath.co.th,manager.co.th,bangkokpost.com,nationthailand.com"
-        
-        # ค้นหาด้วย keywords ภาษาไทย
-        params = {
-            "q": search_query_th,
-            "domains": thai_sources,
-            "sortBy": "relevancy",  # เรียงตามความเกี่ยวข้อง
-            "pageSize": max_results,
-            "apiKey": NEWS_API_KEY
-        }
-        
-        response = requests.get(NEWS_API_BASE_URL, params=params, timeout=5)
-        
-        if response.status_code != 200:
-            print(f"❌ NewsAPI error: {response.status_code}")
-            # Fallback ไป Google Search
-            return search_google_news(query, max_results)
-        
-        data = response.json()
         related_news = []
         
-        total_results = data.get('totalResults', 0)
-        print(f"📰 NewsAPI found: {total_results} articles")
+        # ลองค้นหาหลายรูปแบบ
+        search_attempts = [
+            (" ".join(keywords[:3]), "ค้นหาด้วย 3 keywords แรก"),  # ลองแบบเจาะจง
+            (" ".join(keywords[:5]), "ค้นหาด้วย 5 keywords"),      # ปกติ
+            (keywords[0] if keywords else "", "ค้นหาด้วย keyword เดียว")  # กว้างที่สุด
+        ]
         
-        # ถ้าไม่มีผลลัพธ์เลย ใช้ Google Search แทน
-        if total_results == 0:
-            print(f"⚠️ No relevant news found in NewsAPI, trying Google Search...")
-            return search_google_news(query, max_results)
+        for search_query, description in search_attempts:
+            if not search_query or len(search_query) < 2:
+                continue
+                
+            print(f"🔍 {description}: {search_query}")
+            
+            # แหล่งข่าวไทยที่ NewsAPI รองรับ
+            params = {
+                "q": search_query,
+                "language": "th",  # ระบุภาษาไทย
+                "sortBy": "relevancy",
+                "pageSize": 10,  # ขอมากหน่อยเพื่อกรอง
+                "apiKey": NEWS_API_KEY
+            }
+            
+            response = requests.get(NEWS_API_BASE_URL, params=params, timeout=5)
+            
+            if response.status_code != 200:
+                print(f"⚠️ NewsAPI error: {response.status_code}")
+                continue
+            
+            data = response.json()
+            total_results = data.get('totalResults', 0)
+            print(f"  📰 Found: {total_results} articles")
+            
+            if total_results > 0 and data.get("status") == "ok" and data.get("articles"):
+                # เจอแล้ว ใช้ผลลัพธ์นี้
+                for article in data["articles"]:
+                    source_url = article.get("url", "")
+                    source_domain = ""
+                    
+                    if source_url:
+                        try:
+                            from urllib.parse import urlparse
+                            parsed = urlparse(source_url)
+                            source_domain = parsed.netloc.replace("www.", "")
+                        except:
+                            source_domain = article.get("source", {}).get("name", "unknown")
+                    
+                    related_news.append({
+                        "title": article.get("title", ""),
+                        "source": source_domain or article.get("source", {}).get("name", "unknown"),
+                        "url": article.get("url", ""),
+                        "content": article.get("description", "") or article.get("content", ""),
+                        "publishedAt": article.get("publishedAt", "")
+                    })
+                
+                print(f"  ✅ Collected {len(related_news)} articles")
+                break  # เจอแล้วไม่ต้องลองต่อ
+        
+        if len(related_news) == 0:
+            print(f"⚠️ No news found after all attempts")
+            return []
+        
+        print(f"✅ Returning {len(related_news)} articles for similarity check")
+        return related_news[:10]  # ส่งไปเช็ค similarity ก่อน
         
         if data.get("status") == "ok" and data.get("articles"):
             for article in data["articles"][:max_results]:
@@ -330,12 +269,12 @@ def adjust_confidence_with_related_news(
         # คำนวณความคล้ายคลึง
         similarity = calculate_text_similarity(user_text, news.get('content', news.get('title', '')))
         
-        # กรองข่าวที่ similarity ต่ำมาก (< 5%) ออก
-        if similarity < 0.05:
-            print(f"⚠️ Skipping low similarity article: {news.get('title', '')[:50]}... (similarity: {round(similarity * 100, 1)}%)")
+        # กรองข่าวที่ similarity ต่ำมาก (< 3%) ออก - ใช้ threshold ต่ำเพื่อให้โอกาส
+        if similarity < 0.03:
+            print(f"⚠️ Skipping low similarity: {news.get('title', '')[:40]}... ({round(similarity * 100, 1)}%)")
             continue
         
-        print(f"✅ Found relevant article: {news.get('title', '')[:50]}... (similarity: {round(similarity * 100, 1)}%)")
+        print(f"✅ Relevant article: {news.get('title', '')[:40]}... ({round(similarity * 100, 1)}%)")
         
         if similarity > max_similarity:
             max_similarity = similarity
