@@ -95,6 +95,67 @@ class RelatedNews(BaseModel):
     similarity: float
     is_trusted: bool
 
+def search_google_news(query: str, max_results: int = 5) -> List[dict]:
+    """ค้นหาข่าวจาก Google โดยตรง (fallback สำหรับเมื่อ NewsAPI ไม่เจอ)"""
+    try:
+        from urllib.parse import quote_plus
+        
+        # สกัด keywords
+        keywords = extract_keywords(query)
+        if len(keywords) < 2:
+            return []
+        
+        search_query = " ".join(keywords[:5])
+        print(f"🔍 Searching Google News with: {search_query}")
+        
+        # Search ใน Google โดยเฉพาะจากเว็บข่าวไทย
+        search_url = f"https://www.google.com/search?q={quote_plus(search_query)}+site:thairath.co.th OR site:manager.co.th OR site:bangkokpost.com&num=10"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        response = requests.get(search_url, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            print(f"❌ Google search error: {response.status_code}")
+            return []
+        
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        results = []
+        # ดึงผลลัพธ์การค้นหาจาก Google
+        for g in soup.find_all('div', class_='g')[:max_results]:
+            try:
+                title_elem = g.find('h3')
+                link_elem = g.find('a')
+                
+                if title_elem and link_elem:
+                    title = title_elem.get_text()
+                    url = link_elem.get('href')
+                    
+                    # ดึง source domain
+                    from urllib.parse import urlparse
+                    source_domain = urlparse(url).netloc.replace('www.', '')
+                    
+                    results.append({
+                        'title': title,
+                        'source': source_domain,
+                        'url': url,
+                        'content': title,  # ใช้ title เป็น content ชั่วคราว
+                        'publishedAt': ''
+                    })
+            except:
+                continue
+        
+        print(f"✅ Google found {len(results)} articles")
+        return results
+        
+    except Exception as e:
+        print(f"❌ Google search error: {e}")
+        return []
+
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
     """ค้นหาข่าวที่เกี่ยวข้องจาก NewsAPI (แหล่งข่าวไทย)"""
     try:
@@ -131,7 +192,8 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
         
         if response.status_code != 200:
             print(f"❌ NewsAPI error: {response.status_code}")
-            return []
+            # Fallback ไป Google Search
+            return search_google_news(query, max_results)
         
         data = response.json()
         related_news = []
@@ -139,10 +201,10 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
         total_results = data.get('totalResults', 0)
         print(f"📰 NewsAPI found: {total_results} articles")
         
-        # ถ้าไม่มีผลลัพธ์เลย ไม่ต้อง fallback ไปค้นหาทั่วไป
+        # ถ้าไม่มีผลลัพธ์เลย ใช้ Google Search แทน
         if total_results == 0:
-            print(f"⚠️ No relevant news found for these keywords")
-            return []
+            print(f"⚠️ No relevant news found in NewsAPI, trying Google Search...")
+            return search_google_news(query, max_results)
         
         if data.get("status") == "ok" and data.get("articles"):
             for article in data["articles"][:max_results]:
