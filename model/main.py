@@ -312,6 +312,12 @@ def read_root():
 
 @app.post("/predict")
 def predict(news: News):
+    print(f"\n{'='*50}")
+    print(f"🆕 New prediction request")
+    print(f"📝 Text length: {len(news.text)} chars")
+    print(f"✅ check_related flag: {news.check_related}")
+    print(f"{'='*50}\n")
+    
     # ตรวจสอบ URL ถ้ามี
     url_verification = None
     url_override = False
