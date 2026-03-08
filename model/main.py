@@ -185,9 +185,12 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
         
         if response.status_code != 200:
             print(f"❌ SearchAPI error: {response.status_code}")
+            print(f"📄 Response: {response.text[:500]}")
             return []
         
         data = response.json()
+        print(f"📦 SearchAPI response keys: {list(data.keys())}")
+        print(f"📊 Full response: {data}")
         related_news = []
         
         # SearchAPI คืนผลลัพธ์ใน data['news_results']
