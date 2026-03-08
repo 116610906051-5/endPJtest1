@@ -6,7 +6,10 @@ async function checkNews(text: string) {
   const res = await fetch(`${API_URL}/predict`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text })
+    body: JSON.stringify({ 
+      text,
+      check_related: true  // เปิดการค้นหาข่าวที่เกี่ยวข้อง
+    })
   });
 
   const data = await res.json();
