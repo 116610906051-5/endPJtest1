@@ -193,11 +193,13 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
         print(f"📊 Full response: {data}")
         related_news = []
         
-        # SearchAPI คืนผลลัพธ์ใน data['news_results']
-        if data.get("news_results"):
-            print(f"📰 Found {len(data['news_results'])} results from SearchAPI")
+        # SearchAPI คืนผลลัพธ์ใน data['organic_results'] เมื่อใช้ google_news engine
+        results_key = 'news_results' if 'news_results' in data else 'organic_results'
+        
+        if data.get(results_key):
+            print(f"📰 Found {len(data[results_key])} results from SearchAPI (key: {results_key})")
             
-            for article in data["news_results"][:max_results]:
+            for article in data[results_key][:max_results]:
                 # ดึง domain จาก link
                 source_url = article.get("link", "")
                 source_domain = ""
