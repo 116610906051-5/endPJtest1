@@ -15,6 +15,7 @@ import re
 app = FastAPI(title="Fake News Detection API - BiLSTM with SearchAPI")
 
 # เปิด CORS เพื่อให้ Frontend เรียกได้
+# Updated: Added check_related flag support for SearchAPI integration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
