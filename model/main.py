@@ -12,6 +12,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from typing import Optional, List
 import re
 
+# Version: 1.0.1 - BiLSTM with SearchAPI and Thai keyword support
 app = FastAPI(title="Fake News Detection API - BiLSTM with SearchAPI")
 
 # เปิด CORS เพื่อให้ Frontend เรียกได้
