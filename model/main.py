@@ -161,6 +161,9 @@ class RelatedNews(BaseModel):
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
     """ค้นหาข่าวที่เกี่ยวข้องจาก SearchAPI (รองรับข่าวไทย)"""
     try:
+        print(f"\n🔍 Starting search_related_news...")
+        print(f"📝 Input query: {query}")
+        
         # สกัด keywords สำหรับค้นหา
         keywords = extract_keywords(query)
         search_query = " ".join(keywords[:3])  # ใช้ 3 keywords แรก
@@ -224,11 +227,12 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
         return []
 
 def extract_keywords(text: str, max_keywords: int = 5) -> List[str]:
-    """สกัดคำสำคัญจากข้อความ"""
-    # ใช้ pythainlp ถ้ามี หรือใช้ regex เบื้องต้น
-    words = re.findall(r'\b\w+\b', text)
-    # กรองคำที่ยาวกว่า 2 ตัวอักษร
-    keywords = [w for w in words if len(w) > 2][:max_keywords]
+    """สกัดคำสำคัญจากข้อความ (รองรับภาษาไทย)"""
+    # ใช้ pythainlp สำหรับภาษาไทย
+    words = word_tokenize(text, engine='newmm')
+    # กรองคำที่ยาวกว่า 2 ตัวอักษร และไม่ใช่เครื่องหมาย
+    keywords = [w for w in words if len(w) > 2 and not w.isspace()][:max_keywords]
+    print(f"🔑 Extracted keywords: {keywords}")
     return keywords
 
 def calculate_text_similarity(text1: str, text2: str) -> float:
@@ -355,7 +359,9 @@ def predict(news: News):
     
     # ถ้าต้องการตรวจสอบข่าวที่เกี่ยวข้อง
     if news.check_related:
+        print(f"\n✅ check_related is True, searching for related news...")
         related_news = search_related_news(news.text)
+        print(f"📊 Search returned {len(related_news)} articles")
         
         if related_news:
             adjusted_confidence, related_items = adjust_confidence_with_related_news(
@@ -372,5 +378,10 @@ def predict(news: News):
                 f"พบข่าวที่เกี่ยวข้อง {len(related_items)} รายการ "
                 f"จากแหล่งที่น่าเชื่อถือ {sum(1 for r in related_items if r['is_trusted'])} แหล่ง"
             )
+            print(f"✅ Added {len(related_items)} related news items to response")
+        else:
+            print(f"⚠️ No related news found")
+    else:
+        print(f"⚠️ check_related is False, skipping news search")
     
     return response

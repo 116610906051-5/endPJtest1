@@ -45,6 +45,10 @@ function App() {
     
     try {
       const data = await checkNews(inputText)
+      console.log('📊 API Response:', data)  // Debug log
+      console.log('📰 Related News:', data.related_news)  // Debug log
+      console.log('🔢 Related News Count:', data.related_news?.length)  // Debug log
+      
       const confidence = data.confidence
       const relatedNews = data.related_news || []
       const verificationNote = data.verification_note
