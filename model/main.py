@@ -23,8 +23,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ตั้งค่า device
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# ตั้งค่า device (CPU-only)
+device = torch.device('cpu')
 print(f"🖥️ Using device: {device}")
 
 # โหลด BiLSTM model
@@ -78,6 +78,16 @@ print("✅ BiLSTM model loaded successfully!")
 print(f"📊 Model: BiLSTM (Bidirectional LSTM)")
 print(f"📊 Accuracy: 98.90%")
 
+def text_to_sequence(text: str, word2idx: dict, max_len: int) -> torch.Tensor:
+    """แปลงข้อความเป็น sequence สำหรับ BiLSTM"""
+    tokens = word_tokenize(text, engine='newmm')
+    seq = [word2idx.get(word, 1) for word in tokens]  # 1 = <UNK>
+    if len(seq) > max_len:
+        seq = seq[:max_len]
+    else:
+        seq = seq + [0] * (max_len - len(seq))  # 0 = <PAD>
+    return torch.LongTensor([seq]).to(device)
+
 # แหล่งข่าวที่น่าเชื่อถือในประเทศไทย
 TRUSTED_NEWS_SOURCES = [
     "thairath.co.th",
@@ -92,28 +102,14 @@ TRUSTED_NEWS_SOURCES = [
     "dailynews.co.th"
 ]
 
-# NewsAPI Configuration (เก่า - ไม่มีข่าวไทย)
-# NEWS_API_KEY = "277729d09fc640549010e57ecb99c09d"
-# NEWS_API_BASE_URL = "https://newsapi.org/v2/everything"
-
 # SearchAPI Configuration (ใช้แทน NewsAPI - มีข่าวไทยเยอะกว่า)
 SEARCHAPI_KEY = "jkiyja5rtFwfdQYjXh5nLLjC"
 SEARCHAPI_URL = "https://www.searchapi.io/api/v1/search"
 
 class News(BaseModel):
     text: str
-    check_related: Optional[bool] = True  # เปิดเป็นค่าเริ่มต้น
+    check_related: Optional[bool] = True
     source_url: Optional[str] = None  # URL ของข่าว (ถ้ามี)
-
-def text_to_sequence(text: str, word2idx: dict, max_len: int) -> torch.Tensor:
-    """แปลงข้อความเป็น sequence สำหรับ BiLSTM"""
-    tokens = word_tokenize(text, engine='newmm')
-    seq = [word2idx.get(word, 1) for word in tokens]  # 1 = <UNK>
-    if len(seq) > max_len:
-        seq = seq[:max_len]
-    else:
-        seq = seq + [0] * (max_len - len(seq))  # 0 = <PAD>
-    return torch.LongTensor([seq]).to(device)
 
 TRUSTED_SOURCES = {
     "thairath.co.th",
@@ -161,68 +157,40 @@ class RelatedNews(BaseModel):
     similarity: float
     is_trusted: bool
 
-
-
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
-    """ค้นหาข่าวที่เกี่ยวข้องจาก SearchAPI (Google Search)"""
+    """ค้นหาข่าวที่เกี่ยวข้องจาก NewsAPI (แหล่งข่าวไทย)"""
     try:
-        # ตรวจสอบความยาวข้อความก่อน
-        if len(query.strip()) < 10:
-            print(f"⚠️ Text too short, skipping")
-            return []
-        
-        # สกัด keywords
+        # สกัด keywords สำหรับค้นหา
         keywords = extract_keywords(query)
-        if len(keywords) < 2:
-            print(f"⚠️ Not enough keywords")
+        search_query_th = " ".join(keywords[:3])  # ใช้ 3 keywords แรก
+        
+        # ใช้คำค้นหาทั่วไปเกี่ยวกับประเทศไทยแทน (NewsAPI รองรับภาษาอังกฤษดีกว่า)
+        search_query = "Thailand news"
+        
+        print(f"🔍 Searching NewsAPI for: {search_query} (original: {search_query_th})")
+        
+        # แหล่งข่าวไทยที่ NewsAPI รองรับ
+        thai_sources = "thairath.co.th,manager.co.th,bangkokpost.com,nationthailand.com"
+        
+        # เรียก NewsAPI แบบระบุ sources
+        params = {
+            "q": search_query,
+            "domains": thai_sources,
+            "sortBy": "publishedAt",  # เรียงตามวันที่เผยแพร่ล่าสุด
+            "pageSize": max_results,
+            "apiKey": NEWS_API_KEY
+        }
+        
+        response = requests.get(NEWS_API_BASE_URL, params=params, timeout=5)
+        
+        if response.status_code != 200:
+            print(f"❌ NewsAPI error: {response.status_code}")
             return []
         
-        search_query = " ".join(keywords[:3])
-        print(f"🔍 SearchAPI: {search_query}")
+        data = response.json()
+        related_news = []
         
-        # ค้นหาจากแหล่งข่าวไทย
-        thai_sites = ["thairath.co.th", "manager.co.th", "khaosod.co.th"]
-        all_results = []
-        
-        for site in thai_sites:
-            params = {
-                "engine": "google",
-                "q": f"{search_query} site:{site}",
-                "api_key": SEARCHAPI_KEY
-            }
-            
-            try:
-                response = requests.get(SEARCHAPI_URL, params=params, timeout=10)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    organic = data.get('organic_results', [])
-                    
-                    print(f"  📰 {site}: {len(organic)} articles")
-                    
-                    for result in organic[:3]:  # เอา 3 ข่าวแรกจากแต่ละเว็บ
-                        all_results.append({
-                            "title": result.get('title', ''),
-                            "source": site,
-                            "url": result.get('link', ''),
-                            "content": result.get('snippet', '') or result.get('title', ''),
-                            "publishedAt": ""
-                        })
-                        
-                elif response.status_code == 429:
-                    print(f"  ⚠️ SearchAPI rate limit reached")
-                    break
-                    
-            except Exception as e:
-                print(f"  ⚠️ Error with {site}: {e}")
-                continue
-        
-        print(f"✅ Collected {len(all_results)} articles")
-        return all_results[:10]  # ส่งไปเช็ค similarity
-        
-    except Exception as e:
-        print(f"❌ Search error: {e}")
-        return []
+        print(f"📰 NewsAPI status: {data.get('status')}, Total: {data.get('totalResults', 0)}")
         
         if data.get("status") == "ok" and data.get("articles"):
             for article in data["articles"][:max_results]:
@@ -242,11 +210,10 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
                     "title": article.get("title", ""),
                     "source": source_domain or article.get("source", {}).get("name", "unknown"),
                     "url": article.get("url", ""),
-                    "content": article.get("description", "") or article.get("content", ""),
-                    "publishedAt": article.get("publishedAt", "")
+                    "content": article.get("description", "") or article.get("content", "")
                 })
             
-            print(f"✅ Returning {len(related_news)} related articles")
+            print(f"✅ Found {len(related_news)} related articles")
         
         return related_news
         
@@ -257,31 +224,13 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
         print(f"Error searching news: {e}")
         return []
 
-def extract_keywords(text: str, max_keywords: int = 10) -> List[str]:
-    """สกัดคำสำคัญจากข้อความภาษาไทย"""
-    try:
-        from pythainlp.tokenize import word_tokenize
-        from pythainlp.corpus import thai_stopwords
-        
-        # Tokenize ภาษาไทย
-        words = word_tokenize(text, engine='newmm')
-        
-        # โหลด stopwords
-        stopwords = thai_stopwords()
-        
-        # กรองคำที่ไม่ใช่ stopwords และยาวกว่า 1 ตัวอักษร
-        keywords = [w for w in words if w not in stopwords and len(w) > 1 and not w.isspace()]
-        
-        # เอาเฉพาะคำที่มีความหมาย (กรองเครื่องหมายออก)
-        meaningful_keywords = [w for w in keywords if any(c.isalnum() for c in w)]
-        
-        return meaningful_keywords[:max_keywords]
-    except Exception as e:
-        print(f"⚠️ Keyword extraction error: {e}, using simple method")
-        # Fallback: ใช้ regex เบื้องต้น
-        words = re.findall(r'\b\w+\b', text)
-        keywords = [w for w in words if len(w) > 2][:max_keywords]
-        return keywords
+def extract_keywords(text: str, max_keywords: int = 5) -> List[str]:
+    """สกัดคำสำคัญจากข้อความ"""
+    # ใช้ pythainlp ถ้ามี หรือใช้ regex เบื้องต้น
+    words = re.findall(r'\b\w+\b', text)
+    # กรองคำที่ยาวกว่า 2 ตัวอักษร
+    keywords = [w for w in words if len(w) > 2][:max_keywords]
+    return keywords
 
 def calculate_text_similarity(text1: str, text2: str) -> float:
     """คำนวณความคล้ายคลึงระหว่างข้อความ 2 ข้อความ"""
@@ -314,13 +263,6 @@ def adjust_confidence_with_related_news(
         # คำนวณความคล้ายคลึง
         similarity = calculate_text_similarity(user_text, news.get('content', news.get('title', '')))
         
-        # กรองข่าวที่ similarity ต่ำมาก (< 3%) ออก - ใช้ threshold ต่ำเพื่อให้โอกาส
-        if similarity < 0.03:
-            print(f"⚠️ Skipping low similarity: {news.get('title', '')[:40]}... ({round(similarity * 100, 1)}%)")
-            continue
-        
-        print(f"✅ Relevant article: {news.get('title', '')[:40]}... ({round(similarity * 100, 1)}%)")
-        
         if similarity > max_similarity:
             max_similarity = similarity
         
@@ -328,22 +270,16 @@ def adjust_confidence_with_related_news(
             trusted_count += 1
         
         related_items.append({
-            "title": news.get('title', '')[:150],
+            "title": news.get('title', '')[:100],
             "source": news.get('source', 'unknown'),
             "url": news.get('url', ''),
             "similarity": round(similarity * 100, 1),
-            "is_trusted": is_trusted,
-            "publishedAt": news.get('publishedAt', '')
+            "is_trusted": is_trusted
         })
     
     # ปรับ confidence
     # ถ้ามีข่าวจากแหล่งที่น่าเชื่อถือและคล้ายคลึงกัน -> เพิ่ม confidence
     adjustment = 0.0
-    
-    # ถ้าไม่มีข่าวที่เกี่ยวข้องหลังกรอง ให้ return ว่าง
-    if len(related_items) == 0:
-        print(f"⚠️ All articles filtered out due to low similarity")
-        return original_confidence, []
     
     if trusted_count > 0 and max_similarity > 0.3:
         # เพิ่ม confidence ตามจำนวนแหล่งที่เชื่อถือและความคล้ายคลึง
@@ -356,12 +292,12 @@ def adjust_confidence_with_related_news(
 @app.get("/")
 def read_root():
     return {
-        "message": "Fake News Detection API - BiLSTM with SearchAPI",
-        "model": "BiLSTM (Bidirectional LSTM)",
-        "accuracy": "98.90%",
+        "message": "Fake News Detection API - Stacking Ensemble",
+        "model": "Stacking (XGBoost + Random Forest + SVM + Logistic Regression)",
+        "accuracy": "85.19%",
         "features": [
-            "Fake news detection with Deep Learning",
-            "Related news verification via SearchAPI",
+            "Fake news detection",
+            "Related news verification",
             "Trusted source checking"
         ],
         "status": "running",
@@ -385,19 +321,23 @@ def predict(news: News):
             url_override = True
             print(f"✅ Verified URL from trusted source: {url_verification.get('domain')}")
     
-    # ใช้ BiLSTM model
+    # ทำนายด้วย BiLSTM
+    sequence = text_to_sequence(news.text, word2idx, MAX_LEN)
+    
     with torch.no_grad():
-        input_seq = text_to_sequence(news.text, word2idx, MAX_LEN)
-        output = model(input_seq)
-        confidence = output.item()
-        confidence_percent = round(confidence * 100, 1)
-        label = "ข่าวจริง" if confidence > 0.5 else "ข่าวปลอม"
+        output = model(sequence)
+        probability = output.item()
+    
+    # แปลงเป็นความเชื่อมั่นและ label
+    confidence_percent = round(probability * 100, 1)
+    decision_score = round(probability * 2 - 1, 3)  # แปลงจาก [0,1] เป็น [-1,1]
+    label = "ข่าวจริง" if probability > 0.5 else "ข่าวปลอม"
     
     response = {
         "confidence": confidence_percent,
+        "decision_score": decision_score,
         "label": label,
-        "raw_score": confidence,
-        "model": "BiLSTM"
+        "raw_score": probability
     }
     
     # ถ้ามี URL ที่ยืนยันได้จากแหล่งที่เชื่อถือ -> ปรับผลลัพธ์
@@ -418,29 +358,20 @@ def predict(news: News):
     if news.check_related:
         related_news = search_related_news(news.text)
         
-        if related_news and len(related_news) > 0:
+        if related_news:
             adjusted_confidence, related_items = adjust_confidence_with_related_news(
                 confidence_percent,
                 related_news,
                 news.text
             )
             
-            if len(related_items) > 0:
-                response["confidence"] = round(adjusted_confidence, 1)
-                response["original_confidence"] = confidence_percent
-                response["confidence_adjustment"] = round(adjusted_confidence - confidence_percent, 1)
-                response["related_news"] = related_items
-                response["verification_note"] = (
-                    f"พบข่าวที่เกี่ยวข้อง {len(related_items)} รายการ "
-                    f"จากแหล่งที่น่าเชื่อถือ {sum(1 for r in related_items if r['is_trusted'])} แหล่ง"
-                )
-            else:
-                # ไม่มีข่าวที่ similarity ผ่าน
-                response["related_news"] = []
-                response["verification_note"] = "ไม่พบข่าวที่เกี่ยวข้องในช่วงเวลานี้ (NewsAPI Free มีข้อจำกัดข่าวไทย)"
-        else:
-            # ไม่มีข่าวเลยจาก NewsAPI
-            response["related_news"] = []
-            response["verification_note"] = "ไม่สามารถตรวจสอบข่าวที่เกี่ยวข้องได้ในขณะนี้ (NewsAPI Free ไม่มีข่าวไทย)"
+            response["confidence"] = round(adjusted_confidence, 1)
+            response["original_confidence"] = confidence_percent
+            response["confidence_adjustment"] = round(adjusted_confidence - confidence_percent, 1)
+            response["related_news"] = related_items
+            response["verification_note"] = (
+                f"พบข่าวที่เกี่ยวข้อง {len(related_items)} รายการ "
+                f"จากแหล่งที่น่าเชื่อถือ {sum(1 for r in related_items if r['is_trusted'])} แหล่ง"
+            )
     
     return response
