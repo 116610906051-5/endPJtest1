@@ -156,47 +156,48 @@ function App() {
                     </div>
                   </div>
                 )}
+              </div>
 
-          {result.relatedNews && result.relatedNews.length > 0 && (
-            <div className="related-news-section">
-              <h3>📰 ข่าวที่เกี่ยวข้องจากแหล่งที่น่าเชื่อถือ</h3>
-              {result.verificationNote && (
-                <p className="verification-note">
-                  ℹ️ {result.verificationNote}
-                </p>
-              )}
-              <div className="related-news-grid">
-                {result.relatedNews.map((news, index) => (
-                  <div key={index} className="news-card">
-                    <div className="news-header">
-                      <span className="news-source">
-                        🌐 {news.source}
-                        {news.is_trusted && <span className="trusted-badge">✓ เชื่อถือได้</span>}
-                      </span>
-                      <span className="news-similarity">
-                        {news.similarity}% ความคล้าย
-                      </span>
-                    </div>
-                    <h4 className="news-title">{news.title}</h4>
-                    <a 
-                      href={news.url} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="news-link"
-                    >
-                      📖 อ่านบทความเต็ม →
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-              </div>
               {result.confidence !== undefined && (
                 <div className="confidence-info">
                   <p style={{ fontSize: '0.9rem', color: '#ccc', marginTop: '10px' }}>
                     💡 ยิ่งค่าความน่าเชื่อถือสูง แสดงว่าข้อมูลมีแนวโน้มเป็นข่าวจริงมากขึ้น
                   </p>
+                </div>
+              )}
+
+              {result.relatedNews && result.relatedNews.length > 0 && (
+                <div className="related-news-section">
+                  <h3>📰 ข่าวที่เกี่ยวข้องจากแหล่งที่น่าเชื่อถือ</h3>
+                  {result.verificationNote && (
+                    <p className="verification-note">
+                      ℹ️ {result.verificationNote}
+                    </p>
+                  )}
+                  <div className="related-news-grid">
+                    {result.relatedNews.map((news, index) => (
+                      <div key={index} className="news-card">
+                        <div className="news-header">
+                          <span className="news-source">
+                            🌐 {news.source}
+                            {news.is_trusted && <span className="trusted-badge">✓ เชื่อถือได้</span>}
+                          </span>
+                          <span className="news-similarity">
+                            {news.similarity}% ความคล้าย
+                          </span>
+                        </div>
+                        <h4 className="news-title">{news.title}</h4>
+                        <a 
+                          href={news.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="news-link"
+                        >
+                          📖 อ่านบทความเต็ม →
+                        </a>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
