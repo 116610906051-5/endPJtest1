@@ -158,44 +158,40 @@ class RelatedNews(BaseModel):
     is_trusted: bool
 
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
-    """ค้นหาข่าวที่เกี่ยวข้องจาก NewsAPI (แหล่งข่าวไทย)"""
+    """ค้นหาข่าวที่เกี่ยวข้องจาก SearchAPI (รองรับข่าวไทย)"""
     try:
         # สกัด keywords สำหรับค้นหา
         keywords = extract_keywords(query)
-        search_query_th = " ".join(keywords[:3])  # ใช้ 3 keywords แรก
+        search_query = " ".join(keywords[:3])  # ใช้ 3 keywords แรก
         
-        # ใช้คำค้นหาทั่วไปเกี่ยวกับประเทศไทยแทน (NewsAPI รองรับภาษาอังกฤษดีกว่า)
-        search_query = "Thailand news"
+        print(f"🔍 Searching SearchAPI for: {search_query}")
         
-        print(f"🔍 Searching NewsAPI for: {search_query} (original: {search_query_th})")
-        
-        # แหล่งข่าวไทยที่ NewsAPI รองรับ
-        thai_sources = "thairath.co.th,manager.co.th,bangkokpost.com,nationthailand.com"
-        
-        # เรียก NewsAPI แบบระบุ sources
+        # เรียก SearchAPI
         params = {
+            "engine": "google_news",
             "q": search_query,
-            "domains": thai_sources,
-            "sortBy": "publishedAt",  # เรียงตามวันที่เผยแพร่ล่าสุด
-            "pageSize": max_results,
-            "apiKey": NEWS_API_KEY
+            "gl": "th",  # ประเทศไทย
+            "hl": "th",  # ภาษาไทย
+            "num": max_results * 2,  # ขอมากกว่าเพื่อกรอง
+            "api_key": SEARCHAPI_KEY
         }
         
-        response = requests.get(NEWS_API_BASE_URL, params=params, timeout=5)
+        response = requests.get(SEARCHAPI_URL, params=params, timeout=10)
         
         if response.status_code != 200:
-            print(f"❌ NewsAPI error: {response.status_code}")
+            print(f"❌ SearchAPI error: {response.status_code}")
             return []
         
         data = response.json()
         related_news = []
         
-        print(f"📰 NewsAPI status: {data.get('status')}, Total: {data.get('totalResults', 0)}")
-        
-        if data.get("status") == "ok" and data.get("articles"):
-            for article in data["articles"][:max_results]:
-                # ดึง domain จาก URL
-                source_url = article.get("url", "")
+        # SearchAPI คืนผลลัพธ์ใน data['news_results']
+        if data.get("news_results"):
+            print(f"📰 Found {len(data['news_results'])} results from SearchAPI")
+            
+            for article in data["news_results"][:max_results]:
+                # ดึง domain จาก link
+                source_url = article.get("link", "")
                 source_domain = ""
                 
                 if source_url:
@@ -209,19 +205,21 @@ def search_related_news(query: str, max_results: int = 5) -> List[dict]:
                 related_news.append({
                     "title": article.get("title", ""),
                     "source": source_domain or article.get("source", {}).get("name", "unknown"),
-                    "url": article.get("url", ""),
-                    "content": article.get("description", "") or article.get("content", "")
+                    "url": source_url,
+                    "content": article.get("snippet", "")
                 })
             
-            print(f"✅ Found {len(related_news)} related articles")
+            print(f"✅ Processed {len(related_news)} related articles")
+        else:
+            print(f"⚠️ No news_results found in SearchAPI response")
         
         return related_news
         
     except requests.Timeout:
-        print("NewsAPI timeout")
+        print("⏱️ SearchAPI timeout")
         return []
     except Exception as e:
-        print(f"Error searching news: {e}")
+        print(f"❌ Error searching news: {e}")
         return []
 
 def extract_keywords(text: str, max_keywords: int = 5) -> List[str]:
