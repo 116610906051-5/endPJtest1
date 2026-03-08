@@ -1,15 +1,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import torch
+import torch.nn as nn
 import joblib
 import math
 import requests
+from pythainlp.tokenize import word_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from typing import Optional, List
 import re
 
-app = FastAPI(title="Fake News Detection API - Stacking Ensemble")
+app = FastAPI(title="Fake News Detection API - BiLSTM with SearchAPI")
 
 # เปิด CORS เพื่อให้ Frontend เรียกได้
 app.add_middleware(
@@ -20,11 +23,60 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# โหลดโมเดล Stacking Ensemble
-print("🔧 Loading Stacking Ensemble model...")
-model = joblib.load("svm_model.pkl")
-vectorizer = joblib.load("tfidf.pkl")
-print("✅ Model loaded successfully!")
+# ตั้งค่า device
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"🖥️ Using device: {device}")
+
+# โหลด BiLSTM model
+print("🔧 Loading BiLSTM model...")
+
+class BiLSTMClassifier(nn.Module):
+    def __init__(self, vocab_size, embedding_dim, hidden_dim, num_layers=2, dropout=0.3):
+        super(BiLSTMClassifier, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
+        self.lstm = nn.LSTM(
+            embedding_dim, 
+            hidden_dim, 
+            num_layers=num_layers,
+            bidirectional=True, 
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0
+        )
+        self.dropout = nn.Dropout(dropout)
+        self.fc1 = nn.Linear(hidden_dim * 2, 64)
+        self.fc2 = nn.Linear(64, 1)
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
+    
+    def forward(self, x):
+        embedded = self.embedding(x)
+        lstm_out, (hidden, cell) = self.lstm(embedded)
+        hidden = torch.cat((hidden[-2], hidden[-1]), dim=1)
+        hidden = self.dropout(hidden)
+        out = self.relu(self.fc1(hidden))
+        out = self.dropout(out)
+        out = self.sigmoid(self.fc2(out))
+        return out
+
+# โหลด word2idx
+word2idx = joblib.load("word2idx.pkl")
+MAX_LEN = 100
+
+# สร้างและโหลด model
+model = BiLSTMClassifier(
+    vocab_size=len(word2idx),
+    embedding_dim=128,
+    hidden_dim=64,
+    num_layers=2,
+    dropout=0.3
+).to(device)
+
+model.load_state_dict(torch.load("lstm_model.pth", map_location=device))
+model.eval()
+
+print("✅ BiLSTM model loaded successfully!")
+print(f"📊 Model: BiLSTM (Bidirectional LSTM)")
+print(f"📊 Accuracy: 98.90%")
 
 # แหล่งข่าวที่น่าเชื่อถือในประเทศไทย
 TRUSTED_NEWS_SOURCES = [
@@ -52,6 +104,16 @@ class News(BaseModel):
     text: str
     check_related: Optional[bool] = True  # เปิดเป็นค่าเริ่มต้น
     source_url: Optional[str] = None  # URL ของข่าว (ถ้ามี)
+
+def text_to_sequence(text: str, word2idx: dict, max_len: int) -> torch.Tensor:
+    """แปลงข้อความเป็น sequence สำหรับ BiLSTM"""
+    tokens = word_tokenize(text, engine='newmm')
+    seq = [word2idx.get(word, 1) for word in tokens]  # 1 = <UNK>
+    if len(seq) > max_len:
+        seq = seq[:max_len]
+    else:
+        seq = seq + [0] * (max_len - len(seq))  # 0 = <PAD>
+    return torch.LongTensor([seq]).to(device)
 
 TRUSTED_SOURCES = {
     "thairath.co.th",
@@ -294,12 +356,12 @@ def adjust_confidence_with_related_news(
 @app.get("/")
 def read_root():
     return {
-        "message": "Fake News Detection API - Stacking Ensemble",
-        "model": "Stacking (XGBoost + Random Forest + SVM + Logistic Regression)",
-        "accuracy": "85.19%",
+        "message": "Fake News Detection API - BiLSTM with SearchAPI",
+        "model": "BiLSTM (Bidirectional LSTM)",
+        "accuracy": "98.90%",
         "features": [
-            "Fake news detection",
-            "Related news verification",
+            "Fake news detection with Deep Learning",
+            "Related news verification via SearchAPI",
             "Trusted source checking"
         ],
         "status": "running",
@@ -323,34 +385,19 @@ def predict(news: News):
             url_override = True
             print(f"✅ Verified URL from trusted source: {url_verification.get('domain')}")
     
-    X = vectorizer.transform([news.text])
-    
-    # ตรวจสอบว่าโมเดลมี decision_function หรือไม่
-    if hasattr(model, 'decision_function'):
-        # สำหรับ LinearSVC หรือโมเดลที่มี decision_function
-        decision = model.decision_function(X)[0]
-        confidence = 1 / (1 + math.exp(-decision))
+    # ใช้ BiLSTM model
+    with torch.no_grad():
+        input_seq = text_to_sequence(news.text, word2idx, MAX_LEN)
+        output = model(input_seq)
+        confidence = output.item()
         confidence_percent = round(confidence * 100, 1)
-        decision_score = round(decision, 3)
         label = "ข่าวจริง" if confidence > 0.5 else "ข่าวปลอม"
-    elif hasattr(model, 'predict_proba'):
-        # สำหรับ Ensemble models และโมเดลอื่นๆ ที่มี predict_proba
-        proba = model.predict_proba(X)[0]
-        confidence_percent = round(proba[1] * 100, 1)
-        decision_score = round(proba[1] - proba[0], 3)
-        label = "ข่าวจริง" if proba[1] > 0.5 else "ข่าวปลอม"
-    else:
-        # fallback สำหรับโมเดลที่ไม่มีทั้งสองแบบ
-        prediction = model.predict(X)[0]
-        confidence_percent = 100.0 if prediction == 1 else 0.0
-        decision_score = 1.0 if prediction == 1 else -1.0
-        label = "ข่าวจริง" if prediction == 1 else "ข่าวปลอม"
     
     response = {
         "confidence": confidence_percent,
-        "decision_score": decision_score,
         "label": label,
-        "raw_score": confidence_percent / 100.0
+        "raw_score": confidence,
+        "model": "BiLSTM"
     }
     
     # ถ้ามี URL ที่ยืนยันได้จากแหล่งที่เชื่อถือ -> ปรับผลลัพธ์
