@@ -333,9 +333,11 @@ TRUSTED_NEWS_SOURCES = [
     "dailynews.co.th"
 ]
 
-# SearchAPI Configuration (ใช้แทน NewsAPI - มีข่าวไทยเยอะกว่า)
-SEARCHAPI_KEY = "jkiyja5rtFwfdQYjXh5nLLjC"
-SEARCHAPI_URL = "https://www.searchapi.io/api/v1/search"
+# Google Custom Search API Configuration
+# ควรกำหนดผ่าน Environment Variables บน Railway/Server เท่านั้น
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
+GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 
 class News(BaseModel):
     text: str
@@ -389,73 +391,79 @@ class RelatedNews(BaseModel):
     is_trusted: bool
 
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
-    """ค้นหาข่าวที่เกี่ยวข้องจาก SearchAPI (รองรับข่าวไทย)"""
+    """ค้นหาข่าวที่เกี่ยวข้องจาก Google Custom Search API (รองรับภาษาไทย)."""
     try:
-        print(f"\n🔍 Starting search_related_news...")
-        print(f"📝 Input query: {query}")
-        
-        # สกัด keywords สำหรับค้นหา
-        keywords = extract_keywords(query)
-        search_query = " ".join(keywords[:3])  # ใช้ 3 keywords แรก
-        
-        print(f"🔍 Searching SearchAPI for: {search_query}")
-        
-        # เรียก SearchAPI
+        print(f"\n🔍 Starting search_related_news (Google API)...")
+
+        if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
+            print("⚠️ Missing GOOGLE_API_KEY or GOOGLE_CSE_ID; skipping related-news search")
+            return []
+
+        # สกัด keywords สำหรับค้นหาให้เหมาะกับข่าว
+        keywords = extract_keywords(query, max_keywords=8)
+        search_query = " ".join(keywords[:6]).strip() or query[:120]
+
+        print(f"🔍 Google search query: {search_query}")
+
+        # Google Custom Search จำกัด num <= 10
+        num_results = max(1, min(max_results * 2, 10))
         params = {
-            "engine": "google_news",
+            "key": GOOGLE_API_KEY,
+            "cx": GOOGLE_CSE_ID,
             "q": search_query,
-            "gl": "th",  # ประเทศไทย
-            "hl": "th",  # ภาษาไทย
-            "num": max_results * 2,  # ขอมากกว่าเพื่อกรอง
-            "api_key": SEARCHAPI_KEY
+            "num": num_results,
+            "hl": "th",
+            "gl": "th",
+            "safe": "off",
         }
-        
-        response = requests.get(SEARCHAPI_URL, params=params, timeout=10)
-        
+
+        response = requests.get(GOOGLE_CSE_URL, params=params, timeout=10)
+
         if response.status_code != 200:
-            print(f"❌ SearchAPI error: {response.status_code}")
+            print(f"❌ Google API error: {response.status_code}")
             print(f"📄 Response: {response.text[:500]}")
             return []
-        
+
         data = response.json()
-        print(f"📦 SearchAPI response keys: {list(data.keys())}")
-        print(f"📊 Full response: {data}")
+
+        if data.get("error"):
+            print(f"❌ Google API returned error: {data['error']}")
+            return []
+
+        print(f"📦 Google response keys: {list(data.keys())}")
         related_news = []
-        
-        # SearchAPI คืนผลลัพธ์ใน data['organic_results'] เมื่อใช้ google_news engine
-        results_key = 'news_results' if 'news_results' in data else 'organic_results'
-        
-        if data.get(results_key):
-            print(f"📰 Found {len(data[results_key])} results from SearchAPI (key: {results_key})")
-            
-            for article in data[results_key][:max_results]:
-                # ดึง domain จาก link
+
+        # Google CSE ผลลัพธ์อยู่ใน data['items']
+        items = data.get("items", [])
+        if items:
+            print(f"📰 Found {len(items)} results from Google CSE")
+
+            for article in items[:max_results]:
                 source_url = article.get("link", "")
-                source_domain = ""
-                
-                if source_url:
+                source_domain = article.get("displayLink", "")
+
+                if source_url and not source_domain:
                     try:
                         from urllib.parse import urlparse
-                        parsed = urlparse(source_url)
-                        source_domain = parsed.netloc.replace("www.", "")
-                    except:
-                        source_domain = article.get("source", {}).get("name", "unknown")
-                
+                        source_domain = urlparse(source_url).netloc.replace("www.", "")
+                    except Exception:
+                        source_domain = "unknown"
+
                 related_news.append({
                     "title": article.get("title", ""),
-                    "source": source_domain or article.get("source", {}).get("name", "unknown"),
+                    "source": source_domain or "unknown",
                     "url": source_url,
-                    "content": article.get("snippet", "")
+                    "content": article.get("snippet", ""),
                 })
-            
+
             print(f"✅ Processed {len(related_news)} related articles")
         else:
-            print(f"⚠️ No news_results found in SearchAPI response")
-        
+            print("⚠️ No related items found in Google response")
+
         return related_news
-        
+
     except requests.Timeout:
-        print("⏱️ SearchAPI timeout")
+        print("⏱️ Google API timeout")
         return []
     except Exception as e:
         print(f"❌ Error searching news: {e}")
