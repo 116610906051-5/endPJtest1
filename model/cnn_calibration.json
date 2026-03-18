@@ -1,0 +1,5 @@
+{
+  "threshold": 0.32000000000000006,
+  "temperature": 1.5,
+  "note": "Use these values for inference-time calibration if needed"
+}
