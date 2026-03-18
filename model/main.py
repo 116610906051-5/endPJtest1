@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from itertools import groupby
 
 # Version: 2.0.0 - WangchanBERTa (fine-tuned) with BiLSTM fallback
 app = FastAPI(title="Fake News Detection API - WangchanBERTa with SearchAPI")
@@ -386,7 +387,7 @@ def validate_text_quality(text: str) -> dict:
         }
     
     # ตรวจสอบว่ามีตัวอักษรติดต่อกันซ้ำๆ (เช่น "aaaa" หรือ "ววววว")
-    max_repeat = max([len(group) for char, group in __import__('itertools').groupby(text)] if text else [1])
+    max_repeat = max([len(list(group)) for char, group in groupby(text)] if text else [1])
     if max_repeat > 10:
         return {
             "is_valid": False,
