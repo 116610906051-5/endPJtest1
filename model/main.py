@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import torch
 import joblib
 import math
+import json
 import requests
 from pythainlp.tokenize import word_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -33,6 +34,49 @@ app.add_middleware(
 device = torch.device('cpu')
 print(f"🖥️ Using device: {device}")
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def load_cnn_calibration(model_dir: Path) -> dict:
+    """Load CNN calibration config from cnn_calibration.json with safe defaults."""
+    calibration_path = model_dir / "cnn_calibration.json"
+    default_temperature = float(os.getenv("CNN_TEMPERATURE", "2.2"))
+    default_threshold = float(os.getenv("CNN_DECISION_THRESHOLD", "0.5"))
+
+    if not calibration_path.exists():
+        print(f"ℹ️ Calibration file not found, using defaults: {calibration_path}")
+        return {
+            "temperature": default_temperature,
+            "threshold": default_threshold,
+            "source": "defaults",
+        }
+
+    try:
+        with open(calibration_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        temperature = float(data.get("temperature", default_temperature))
+        threshold = float(data.get("threshold", default_threshold))
+
+        # Clamp to safe ranges
+        temperature = min(max(temperature, 0.3), 10.0)
+        threshold = min(max(threshold, 0.1), 0.9)
+
+        print(
+            f"✅ Loaded calibration from {calibration_path.name}: "
+            f"temperature={temperature:.4f}, threshold={threshold:.4f}"
+        )
+        return {
+            "temperature": temperature,
+            "threshold": threshold,
+            "source": str(calibration_path),
+        }
+    except Exception as e:
+        print(f"⚠️ Failed to load calibration file: {e}")
+        return {
+            "temperature": default_temperature,
+            "threshold": default_threshold,
+            "source": "defaults_after_error",
+        }
 
 print("🔧 Loading prediction model...")
 
@@ -84,6 +128,7 @@ class CNNClassifier(nn.Module):
 class CNNPredictor:
     """CNN-based predictor for fake news detection (primary model)."""
     def __init__(self, model_dir: Path):
+        self.calibration = load_cnn_calibration(model_dir)
         self.word2idx = joblib.load(model_dir / "word2idx.pkl")
         self.max_len = 150
         self.model = CNNClassifier(
@@ -98,9 +143,13 @@ class CNNPredictor:
         )
         self.model.eval()
         
-        # Temperature scaling for probability calibration
-        self.temperature = float(os.getenv("CNN_TEMPERATURE", "2.2"))
-        print(f"✅ CNN model loaded with temperature={self.temperature}")
+        # Temperature + threshold from calibration file
+        self.temperature = self.calibration["temperature"]
+        self.decision_threshold = self.calibration["threshold"]
+        print(
+            f"✅ CNN model loaded with temperature={self.temperature} "
+            f"and threshold={self.decision_threshold}"
+        )
 
     def _text_to_sequence(self, text: str) -> torch.Tensor:
         tokens = word_tokenize(text, engine='newmm')
@@ -128,6 +177,7 @@ class CNNPredictor:
 class BiLSTMPredictor:
     """BiLSTM predictor (fallback when CNN model is unavailable)."""
     def __init__(self, model_dir: Path):
+        self.calibration = load_cnn_calibration(model_dir)
         self.word2idx = joblib.load(model_dir / "word2idx.pkl")
         self.max_len = 100
         
@@ -150,7 +200,8 @@ class BiLSTMPredictor:
             print(f"⚠️ CNN model not found, using untrained model: {e}")
         
         self.model.eval()
-        self.temperature = float(os.getenv("CNN_TEMPERATURE", "2.2"))
+        self.temperature = self.calibration["temperature"]
+        self.decision_threshold = self.calibration["threshold"]
 
     def _text_to_sequence(self, text: str) -> torch.Tensor:
         tokens = word_tokenize(text, engine='newmm')
@@ -656,8 +707,10 @@ def predict(news: News):
             url_override = True
             print(f"✅ Verified URL from trusted source: {url_verification.get('domain')}")
     
-    # ทำนายด้วยโมเดลที่ active อยู่ (WangchanBERTa หรือ BiLSTM fallback)
+    # ทำนายด้วยโมเดลที่ active อยู่
     probability = predictor.predict_proba(news.text)
+    decision_threshold = float(getattr(predictor, "decision_threshold", 0.5))
+    decision_threshold = min(max(decision_threshold, 0.1), 0.9)
     
     # แปลงเป็นความเชื่อมั่นและ label
     # Calibrate probability ให้ยืดหยุ่นขึ้นและลด overconfidence
@@ -674,14 +727,16 @@ def predict(news: News):
         print(f"⚠️ Confidence reduced due to text quality issues: {confidence_penalty*100:.1f}% penalty applied")
     
     confidence_percent = round(capped_probability * 100, 1)
-    decision_score = round(capped_probability * 2 - 1, 3)  # แปลงจาก [0,1] เป็น [-1,1]
-    label = "ข่าวจริง" if capped_probability > 0.5 else "ข่าวปลอม"
+    decision_score = round(capped_probability - decision_threshold, 3)
+    label = "ข่าวจริง" if capped_probability >= decision_threshold else "ข่าวปลอม"
     
     response = {
         "confidence": confidence_percent,
         "decision_score": decision_score,
         "label": label,
         "raw_score": probability,
+        "threshold": round(decision_threshold, 4),
+        "temperature": round(float(getattr(predictor, "temperature", 1.0)), 4),
         "model": ACTIVE_MODEL_NAME,
         "uncertainty": calculate_uncertainty(capped_probability),
         "quality_adjusted": text_quality["quality_score"] < 1.0
@@ -730,8 +785,8 @@ def predict(news: News):
             response["verification_note"] = "ไม่พบข่าวที่เกี่ยวข้องหรือใกล้เคียง จึงลดความน่าเชื่อถือลง"
             print(f"⚠️ No related news found, confidence reduced")
 
-        # ปรับ label ตามค่าความน่าเชื่อถือหลังผ่าน related-news logic
-        response["label"] = "ข่าวจริง" if response["confidence"] >= 50.0 else "ข่าวปลอม"
+        # ปรับ label ตาม threshold หลังผ่าน related-news logic
+        response["label"] = "ข่าวจริง" if (response["confidence"] / 100.0) >= decision_threshold else "ข่าวปลอม"
     elif news.check_related and url_override:
         print(f"ℹ️ URL verified: skip related-news confidence adjustment")
         response["search_skipped"] = True
