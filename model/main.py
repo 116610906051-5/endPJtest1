@@ -334,18 +334,19 @@ def validate_text_quality(text: str) -> dict:
     ตรวจสอบคุณภาพของข้อความ
     ป้องกันข้อความมั่วๆที่ไม่มีความหมาย
     """
-    # ✅ รายการคำหยาบคายและคำไร้ความหมาย (Thai language)
+    # ✅ รายการคำหยาบคายและคำไร้ความหมาย (Thai language) - ขยายเพิ่มเติม
     PROFANITY_WORDS = {
-        "เย็ด", "แม่ม", "ไอสัส", "สัตว์", "หมาป่า", "ห่วยเหลือเกิน",
-        "เหี้ยแหก", "หมาขี้ไก่", "คนไม่รู้", "ฉ้อฉล", "เสือก", "งง",
-        "ยังไงวะ", "ไอสัสน้อย", "หาทำไม", "ขี้นอก", "จบหลวง",
-        "ปิดปาก", "ลิ้นยาว", "หนังสือห่วย", "คนห่วย"
+        "เย็ด", "แม่ม", "แม่", "ไอสัส", "ไอสัด", "สัตว์", "หมาป่า", 
+        "ห่วยเหลือเกิน", "เหี้ยแหก", "หมาขี้ไก่", "คนไม่รู้", "ฉ้อฉล", 
+        "เสือก", "งง", "ยังไงวะ", "ไอสัสน้อย", "หาทำไม", "ขี้นอก", 
+        "จบหลวง", "ปิดปาก", "ลิ้นยาว", "หนังสือห่วย", "คนห่วย",
+        "โง่", "ตับ", "โดนัล", "ธรรม", "ไอ"
     }
     
     # ✅ คำแปลกประหลาด/ไม่มีความหมาย
     GIBBERISH_WORDS = {
         "กาก", "ชิบ", "หาย", "เล่น", "ล่ะ", "อะไรยะ",
-        "นั่นนี่", "โน่นนี่", "เฟืองเดือย", "วุ่นวาย"
+        "นั่นนี่", "โน่นนี่", "เฟืองเดือย", "วุ่นวาย", "หมา"
     }
     
     if not text or len(text.strip()) == 0:
@@ -376,11 +377,11 @@ def validate_text_quality(text: str) -> dict:
     total_bad_words = profanity_count + gibberish_count
     bad_word_ratio = total_bad_words / len(meaningful_words) if meaningful_words else 0
     
-    # ถ้ามีคำหยาบคายหรือไร้ความหมาย > 30% → ปฏิเสธ
-    if bad_word_ratio > 0.3:
+    # ✅ เข้มงวดมากขึ้น: ถ้ามีคำหยาบคายหรือไร้ความหมาย > 20% → ปฏิเสธ
+    if bad_word_ratio > 0.2:
         return {
             "is_valid": False,
-            "reason": f"ข้อความมีคำไม่สมควร/หยาบคาย {profanity_count} คำ, ไร้ความหมาย {gibberish_count} คำ ({bad_word_ratio*100:.1f}%)",
+            "reason": f"ข้อความมีคำไม่สมควร/หยาบคาย {profanity_count} คำ, ไร้ความหมาย {gibberish_count} คำ ({bad_word_ratio*100:.1f}%) - เกินเกณฑ์ยอมรับ 20%",
             "quality_score": max(0.0, 1.0 - bad_word_ratio),
             "should_skip_api": True
         }
@@ -567,8 +568,9 @@ def predict(news: News):
     # ✅ ลดความเชื่อมั่นถ้ามีคำไม่เหมาะสม
     if text_quality["quality_score"] < 1.0:
         confidence_penalty = 1.0 - text_quality["quality_score"]
-        capped_probability = capped_probability * (1.0 - confidence_penalty * 0.5)  # ลดความเชื่อมั่นขึ้นถึง 50%
-        print(f"⚠️ Confidence reduced due to text quality issues: {confidence_penalty*100:.1f}% penalty")
+        # ✅ เพิ่ม penalty เป็น 70% แทน 50% ให้เข้มงวดมากขึ้น
+        capped_probability = capped_probability * (1.0 - confidence_penalty * 0.7)  # ลดความเชื่อมั่นขึ้นถึง 70%
+        print(f"⚠️ Confidence reduced due to text quality issues: {confidence_penalty*100:.1f}% penalty applied")
     
     confidence_percent = round(capped_probability * 100, 1)
     decision_score = round(capped_probability * 2 - 1, 3)  # แปลงจาก [0,1] เป็น [-1,1]
