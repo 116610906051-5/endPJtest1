@@ -328,6 +328,92 @@ def calculate_uncertainty(probability: float) -> dict:
         "recommendation": "💡 ควรตรวจสอบข่าวที่เกี่ยวข้อง" if uncertainty_score > 0.4 else "✅ ตรวจสอบแล้ว"
     }
 
+def validate_text_quality(text: str) -> dict:
+    """
+    ตรวจสอบคุณภาพของข้อความ
+    ป้องกันข้อความมั่วๆที่ไม่มีความหมาย
+    """
+    if not text or len(text.strip()) == 0:
+        return {
+            "is_valid": False,
+            "reason": "ข้อความว่างเปล่า",
+            "quality_score": 0.0,
+            "should_skip_api": True
+        }
+    
+    # ตรวจสอบความยาวข้อความ (ต้องมีอย่างน้อย 20 ตัวอักษร)
+    if len(text.strip()) < 20:
+        return {
+            "is_valid": False,
+            "reason": "ข้อความสั้นเกินไป (ต้องมีอย่างน้อย 20 ตัวอักษร)",
+            "quality_score": 0.1,
+            "should_skip_api": True
+        }
+    
+    # แยกคำและกรองเฉพาะคำที่มีความหมาย
+    tokens = word_tokenize(text, engine='newmm')
+    meaningful_words = [w for w in tokens if len(w) > 1 and not w.isspace() and not all(c in '่้๊๋์-็ำฺ' for c in w)]
+    
+    # ตรวจสอบจำนวนคำที่มีความหมาย (ต้องมี >= 3 คำ)
+    if len(meaningful_words) < 3:
+        return {
+            "is_valid": False,
+            "reason": f"คำที่มีความหมายน้อยเกินไป (พบ {len(meaningful_words)} คำ, ต้อง >= 3)",
+            "quality_score": 0.2,
+            "should_skip_api": True
+        }
+    
+    # ตรวจสอบอัตราส่วน whitespace/special chars กับตัวอักษรปกติ
+    special_char_count = sum(1 for c in text if c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' or not c.isalnum())
+    normal_char_count = sum(1 for c in text if c.isalnum() or c.isspace())
+    
+    if normal_char_count == 0:
+        return {
+            "is_valid": False,
+            "reason": "ข้อความประกอบด้วยตัวอักษรพิเศษเกินไป",
+            "quality_score": 0.15,
+            "should_skip_api": True
+        }
+    
+    special_ratio = special_char_count / len(text) if len(text) > 0 else 0
+    
+    if special_ratio > 0.5:
+        return {
+            "is_valid": False,
+            "reason": f"ข้อความมีตัวอักษรพิเศษมากเกินไป ({special_ratio*100:.1f}%)",
+            "quality_score": 0.25,
+            "should_skip_api": True
+        }
+    
+    # ตรวจสอบว่ามีตัวอักษรติดต่อกันซ้ำๆ (เช่น "aaaa" หรือ "ววววว")
+    max_repeat = max([len(group) for char, group in __import__('itertools').groupby(text)] if text else [1])
+    if max_repeat > 10:
+        return {
+            "is_valid": False,
+            "reason": f"ข้อความมีตัวอักษรซ้ำเกินไป (ตัวซ้ำสูงสุด {max_repeat})",
+            "quality_score": 0.2,
+            "should_skip_api": True
+        }
+    
+    # คำนวณคะแนนคุณภาพ
+    quality_score = min(1.0, len(meaningful_words) / 10.0 * (1 - special_ratio * 0.5))
+    
+    if quality_score < 0.4:
+        return {
+            "is_valid": False,
+            "reason": f"ข้อความคุณภาพต่ำ (คะแนน {quality_score:.2f})",
+            "quality_score": quality_score,
+            "should_skip_api": True
+        }
+    
+    return {
+        "is_valid": True,
+        "reason": "ข้อความมีคุณภาพดี",
+        "quality_score": min(1.0, quality_score),
+        "should_skip_api": False,
+        "meaningful_words": len(meaningful_words)
+    }
+
 def calculate_text_similarity(text1: str, text2: str) -> float:
     """คำนวณความคล้ายคลึงระหว่างข้อความ 2 ข้อความ"""
     try:
@@ -411,6 +497,21 @@ def predict(news: News):
     print(f"✅ check_related flag: {news.check_related}")
     print(f"{'='*50}\n")
     
+    # ✅ ตรวจสอบคุณภาพข้อความก่อน
+    text_quality = validate_text_quality(news.text)
+    print(f"📊 Text quality: {text_quality}")
+    
+    if not text_quality["is_valid"]:
+        return {
+            "error": True,
+            "label": "ข้อความไม่สมควร",
+            "confidence": 0.0,
+            "reason": text_quality["reason"],
+            "quality_score": text_quality["quality_score"],
+            "recommendation": "⚠️ กรุณาป้อนข้อความที่มีความหมายและมีความยาวเพียงพอ",
+            "model": ACTIVE_MODEL_NAME
+        }
+    
     # ตรวจสอบ URL ถ้ามี
     url_verification = None
     url_override = False
@@ -458,8 +559,8 @@ def predict(news: News):
         response["override_reason"] = f"ยืนยันจาก URL แหล่งที่เชื่อถือได้: {url_verification['domain']}"
         print(f"🔄 Override: {original_label} ({original_confidence}%) -> ข่าวจริง (95.0%) ด้วย URL verification")
     
-    # ถ้าต้องการตรวจสอบข่าวที่เกี่ยวข้อง
-    if news.check_related:
+    # ถ้าต้องการตรวจสอบข่าวที่เกี่ยวข้อง (แต่ถ้าข้อความมีคุณภาพต่ำ ห้ามค้นหา)
+    if news.check_related and text_quality["is_valid"]:
         print(f"\n✅ check_related is True, searching for related news...")
         related_news = search_related_news(news.text)
         print(f"📊 Search returned {len(related_news)} articles")
@@ -482,7 +583,18 @@ def predict(news: News):
             print(f"✅ Added {len(related_items)} related news items to response")
         else:
             print(f"⚠️ No related news found")
+    elif news.check_related and not text_quality["is_valid"]:
+        print(f"⚠️ Skipping API search - text quality too low")
+        response["search_skipped"] = True
+        response["search_skip_reason"] = "ข้อความมีคุณภาพต่ำ จึงไม่ค้นหาข่าวเพิ่มเติม"
     else:
         print(f"⚠️ check_related is False, skipping news search")
+    
+    # เพิ่มข้อมูลคุณภาพข้อความในการตอบกลับ
+    response["text_quality"] = {
+        "quality_score": round(text_quality["quality_score"], 3),
+        "is_valid": text_quality["is_valid"],
+        "meaningful_words": text_quality.get("meaningful_words", 0)
+    }
     
     return response
