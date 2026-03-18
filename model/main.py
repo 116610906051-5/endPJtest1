@@ -334,6 +334,20 @@ def validate_text_quality(text: str) -> dict:
     ตรวจสอบคุณภาพของข้อความ
     ป้องกันข้อความมั่วๆที่ไม่มีความหมาย
     """
+    # ✅ รายการคำหยาบคายและคำไร้ความหมาย (Thai language)
+    PROFANITY_WORDS = {
+        "เย็ด", "แม่ม", "ไอสัส", "สัตว์", "หมาป่า", "ห่วยเหลือเกิน",
+        "เหี้ยแหก", "หมาขี้ไก่", "คนไม่รู้", "ฉ้อฉล", "เสือก", "งง",
+        "ยังไงวะ", "ไอสัสน้อย", "หาทำไม", "ขี้นอก", "จบหลวง",
+        "ปิดปาก", "ลิ้นยาว", "หนังสือห่วย", "คนห่วย"
+    }
+    
+    # ✅ คำแปลกประหลาด/ไม่มีความหมาย
+    GIBBERISH_WORDS = {
+        "กาก", "ชิบ", "หาย", "เล่น", "ล่ะ", "อะไรยะ",
+        "นั่นนี่", "โน่นนี่", "เฟืองเดือย", "วุ่นวาย"
+    }
+    
     if not text or len(text.strip()) == 0:
         return {
             "is_valid": False,
@@ -354,6 +368,22 @@ def validate_text_quality(text: str) -> dict:
     # แยกคำและกรองเฉพาะคำที่มีความหมาย
     tokens = word_tokenize(text, engine='newmm')
     meaningful_words = [w for w in tokens if len(w) > 1 and not w.isspace() and not all(c in '่้๊๋์-็ำฺ' for c in w)]
+    
+    # ✅ ตรวจสอบคำหยาบคาย
+    profanity_count = sum(1 for word in meaningful_words if word in PROFANITY_WORDS)
+    gibberish_count = sum(1 for word in meaningful_words if word in GIBBERISH_WORDS)
+    
+    total_bad_words = profanity_count + gibberish_count
+    bad_word_ratio = total_bad_words / len(meaningful_words) if meaningful_words else 0
+    
+    # ถ้ามีคำหยาบคายหรือไร้ความหมาย > 30% → ปฏิเสธ
+    if bad_word_ratio > 0.3:
+        return {
+            "is_valid": False,
+            "reason": f"ข้อความมีคำไม่สมควร/หยาบคาย {profanity_count} คำ, ไร้ความหมาย {gibberish_count} คำ ({bad_word_ratio*100:.1f}%)",
+            "quality_score": max(0.0, 1.0 - bad_word_ratio),
+            "should_skip_api": True
+        }
     
     # ตรวจสอบจำนวนคำที่มีความหมาย (ต้องมี >= 3 คำ)
     if len(meaningful_words) < 3:
@@ -533,6 +563,13 @@ def predict(news: News):
     # Apply confidence capping: limit extreme values to make predictions more reasonable
     # Cap at 85% to avoid overconfidence
     capped_probability = min(max(probability, 0.15), 0.85)
+    
+    # ✅ ลดความเชื่อมั่นถ้ามีคำไม่เหมาะสม
+    if text_quality["quality_score"] < 1.0:
+        confidence_penalty = 1.0 - text_quality["quality_score"]
+        capped_probability = capped_probability * (1.0 - confidence_penalty * 0.5)  # ลดความเชื่อมั่นขึ้นถึง 50%
+        print(f"⚠️ Confidence reduced due to text quality issues: {confidence_penalty*100:.1f}% penalty")
+    
     confidence_percent = round(capped_probability * 100, 1)
     decision_score = round(capped_probability * 2 - 1, 3)  # แปลงจาก [0,1] เป็น [-1,1]
     label = "ข่าวจริง" if capped_probability > 0.5 else "ข่าวปลอม"
@@ -543,7 +580,8 @@ def predict(news: News):
         "label": label,
         "raw_score": probability,
         "model": ACTIVE_MODEL_NAME,
-        "uncertainty": calculate_uncertainty(capped_probability)
+        "uncertainty": calculate_uncertainty(capped_probability),
+        "quality_adjusted": text_quality["quality_score"] < 1.0
     }
     
     # ถ้ามี URL ที่ยืนยันได้จากแหล่งที่เชื่อถือ -> ปรับผลลัพธ์
