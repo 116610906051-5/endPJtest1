@@ -17,6 +17,14 @@ import torch.nn as nn
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from itertools import groupby
 
+# Load environment variables from .env file if it exists
+try:
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
+    load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+except ImportError:
+    pass
+
 # Version: 2.0.0 - WangchanBERTa (fine-tuned) with BiLSTM fallback
 app = FastAPI(title="Fake News Detection API - WangchanBERTa with SearchAPI")
 
@@ -391,11 +399,16 @@ TRUSTED_NEWS_SOURCES = [
     "dailynews.co.th"
 ]
 
-# Google Custom Search API Configuration
-# ควรกำหนดผ่าน Environment Variables บน Railway/Server เท่านั้น
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
-GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
+# SearchAPI Configuration (env override -> fallback key)
+SEARCH_API_KEY = os.getenv("SEARCHAPI_KEY", os.getenv("SEARCH_API_KEY", "jkiyja5rtFwfdQYjXh5nLLjC"))
+SEARCH_API_URL = "https://www.searchapi.io/api/v1/search"
+
+# Debug: Show if SearchAPI key is set
+import sys
+if SEARCH_API_KEY:
+    print(f"[Init] SEARCHAPI_KEY is set (length: {len(SEARCH_API_KEY)})", file=sys.stderr)
+else:
+    print("[Init] SEARCHAPI_KEY is NOT set", file=sys.stderr)
 
 class News(BaseModel):
     text: str
@@ -449,79 +462,73 @@ class RelatedNews(BaseModel):
     is_trusted: bool
 
 def search_related_news(query: str, max_results: int = 5) -> List[dict]:
-    """ค้นหาข่าวที่เกี่ยวข้องจาก Google Custom Search API (รองรับภาษาไทย)."""
+    """ค้นหาข่าวที่เกี่ยวข้องจาก SearchAPI (Google News engine)."""
+    import sys
     try:
-        print(f"\n🔍 Starting search_related_news (Google API)...")
+        print(f"[search] Starting search_related_news...", file=sys.stderr)
+        print(f"[search] Query: {query[:100]}", file=sys.stderr)
+        print(f"[search] Max results: {max_results}", file=sys.stderr)
 
-        if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
-            print("⚠️ Missing GOOGLE_API_KEY or GOOGLE_CSE_ID; skipping related-news search")
+        if not SEARCH_API_KEY:
+            print("[search] ERROR: Missing SEARCHAPI_KEY", file=sys.stderr)
             return []
 
-        # สกัด keywords สำหรับค้นหาให้เหมาะกับข่าว
         keywords = extract_keywords(query, max_keywords=8)
         search_query = " ".join(keywords[:6]).strip() or query[:120]
+        print(f"[search] Search query: {search_query}", file=sys.stderr)
 
-        print(f"🔍 Google search query: {search_query}")
-
-        # Google Custom Search จำกัด num <= 10
-        num_results = max(1, min(max_results * 2, 10))
         params = {
-            "key": GOOGLE_API_KEY,
-            "cx": GOOGLE_CSE_ID,
+            "engine": "google_news",
             "q": search_query,
-            "num": num_results,
+            "api_key": SEARCH_API_KEY,
             "hl": "th",
             "gl": "th",
-            "safe": "off",
         }
 
-        response = requests.get(GOOGLE_CSE_URL, params=params, timeout=10)
+        response = requests.get(SEARCH_API_URL, params=params, timeout=15)
+        print(f"[search] Response status: {response.status_code}", file=sys.stderr)
 
         if response.status_code != 200:
-            print(f"❌ Google API error: {response.status_code}")
-            print(f"📄 Response: {response.text[:500]}")
+            print(f"[search] ERROR: HTTP {response.status_code}", file=sys.stderr)
+            print(f"[search] Response text: {response.text[:500]}", file=sys.stderr)
             return []
 
         data = response.json()
-
         if data.get("error"):
-            print(f"❌ Google API returned error: {data['error']}")
+            print(f"[search] ERROR: {data.get('error')}", file=sys.stderr)
             return []
 
-        print(f"📦 Google response keys: {list(data.keys())}")
+        items = data.get("news_results") or data.get("organic_results") or []
+        print(f"[search] Found {len(items)} items", file=sys.stderr)
+
         related_news = []
+        for idx, article in enumerate(items[:max_results]):
+            source_url = article.get("link") or article.get("url") or ""
+            source_domain = article.get("source") or article.get("source_name") or ""
 
-        # Google CSE ผลลัพธ์อยู่ใน data['items']
-        items = data.get("items", [])
-        if items:
-            print(f"📰 Found {len(items)} results from Google CSE")
+            if source_url and not source_domain:
+                try:
+                    from urllib.parse import urlparse
+                    source_domain = urlparse(source_url).netloc.replace("www.", "")
+                except Exception:
+                    source_domain = "unknown"
 
-            for article in items[:max_results]:
-                source_url = article.get("link", "")
-                source_domain = article.get("displayLink", "")
+            title = article.get("title", "")
+            snippet = article.get("snippet") or article.get("description") or ""
 
-                if source_url and not source_domain:
-                    try:
-                        from urllib.parse import urlparse
-                        source_domain = urlparse(source_url).netloc.replace("www.", "")
-                    except Exception:
-                        source_domain = "unknown"
+            print(f"[search] Item {idx}: {source_domain} - {title[:50]}", file=sys.stderr)
+            related_news.append({
+                "title": title,
+                "source": source_domain or "unknown",
+                "url": source_url,
+                "content": snippet,
+            })
 
-                related_news.append({
-                    "title": article.get("title", ""),
-                    "source": source_domain or "unknown",
-                    "url": source_url,
-                    "content": article.get("snippet", ""),
-                })
-
-            print(f"✅ Processed {len(related_news)} related articles")
-        else:
-            print("⚠️ No related items found in Google response")
-
+        print(f"✅ Processed {len(related_news)} related articles")
         return related_news
 
     except requests.Timeout:
-        print("⏱️ Google API timeout")
+        print("⏱️ SearchAPI timeout")
         return []
     except Exception as e:
         print(f"❌ Error searching news: {e}")
