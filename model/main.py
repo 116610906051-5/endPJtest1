@@ -82,8 +82,11 @@ print("🔧 Loading prediction model...")
 
 class CNNClassifier(nn.Module):
     """CNN-based text classifier for fake news detection."""
-    def __init__(self, vocab_size, embedding_dim, num_filters=100, filter_sizes=[3, 4, 5], dropout=0.3):
+    def __init__(self, vocab_size, embedding_dim, num_filters=128, filter_sizes=None, dropout=0.4):
         super(CNNClassifier, self).__init__()
+        if filter_sizes is None:
+            filter_sizes = [2, 3, 4, 5]
+
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
         
         # 1D Convolutional layers with different kernel sizes
@@ -98,7 +101,6 @@ class CNNClassifier(nn.Module):
         self.fc1 = nn.Linear(len(filter_sizes) * num_filters, 64)
         self.fc2 = nn.Linear(64, 1)
         self.relu = nn.ReLU()
-        self.sigmoid = nn.Sigmoid()
     
     def forward(self, x):
         # x shape: (batch_size, seq_len)
@@ -117,12 +119,54 @@ class CNNClassifier(nn.Module):
         # Concatenate all pooled outputs
         cat = torch.cat(conv_outputs, dim=1)  # (batch_size, len(filter_sizes) * num_filters)
         
-        # Fully connected layers
+        # Fully connected layers (return logits)
         cat = self.dropout(cat)
         out = self.relu(self.fc1(cat))
         out = self.dropout(out)
-        out = self.sigmoid(self.fc2(out))
+        out = self.fc2(out)
         return out
+
+
+def load_cnn_model_compatible(model_dir: Path, vocab_size: int) -> tuple:
+    """
+    Load CNN weights with architecture compatibility.
+    Try latest training architecture first, then legacy one.
+    """
+    model_path = model_dir / "cnn_model.pth"
+
+    # Latest training profile (train_cnn.py)
+    latest_cfg = {
+        "embedding_dim": int(os.getenv("CNN_EMBEDDING_DIM", "128")),
+        "num_filters": int(os.getenv("CNN_NUM_FILTERS", "128")),
+        "filter_sizes": [2, 3, 4, 5],
+        "dropout": float(os.getenv("CNN_DROPOUT", "0.4")),
+    }
+
+    # Legacy profile for backward compatibility
+    legacy_cfg = {
+        "embedding_dim": 128,
+        "num_filters": 100,
+        "filter_sizes": [3, 4, 5],
+        "dropout": 0.3,
+    }
+
+    candidate_cfgs = [latest_cfg, legacy_cfg]
+    last_error = None
+
+    for idx, cfg in enumerate(candidate_cfgs, start=1):
+        try:
+            model = CNNClassifier(vocab_size=vocab_size, **cfg).to(device)
+            state_dict = torch.load(model_path, map_location=device, weights_only=True)
+            model.load_state_dict(state_dict)
+            model.eval()
+            profile = "latest" if idx == 1 else "legacy"
+            print(f"✅ Loaded CNN weights with {profile} profile: {cfg}")
+            return model, cfg
+        except Exception as e:
+            last_error = e
+            print(f"⚠️ CNN load profile #{idx} failed: {e}")
+
+    raise RuntimeError(f"Unable to load cnn_model.pth with compatible profiles: {last_error}")
 
 
 class CNNPredictor:
@@ -130,18 +174,12 @@ class CNNPredictor:
     def __init__(self, model_dir: Path):
         self.calibration = load_cnn_calibration(model_dir)
         self.word2idx = joblib.load(model_dir / "word2idx.pkl")
-        self.max_len = 150
-        self.model = CNNClassifier(
+        self.max_len = int(os.getenv("CNN_MAX_LEN", "200"))
+
+        self.model, self.model_config = load_cnn_model_compatible(
+            model_dir=model_dir,
             vocab_size=len(self.word2idx),
-            embedding_dim=128,
-            num_filters=100,
-            filter_sizes=[3, 4, 5],
-            dropout=0.3
-        ).to(device)
-        self.model.load_state_dict(
-            torch.load(model_dir / "cnn_model.pth", map_location=device, weights_only=True)
         )
-        self.model.eval()
         
         # Temperature + threshold from calibration file
         self.temperature = self.calibration["temperature"]
@@ -163,12 +201,8 @@ class CNNPredictor:
     def predict_proba(self, text: str) -> float:
         sequence = self._text_to_sequence(text)
         with torch.no_grad():
-            output = self.model(sequence)
-            raw_prob = output.item()
-            
-            # Apply temperature scaling for calibration
-            logit = math.log(raw_prob / (1 - raw_prob + 1e-10) + 1e-10)
-            scaled_logit = logit / self.temperature
+            logit = self.model(sequence).squeeze(1).item()
+            scaled_logit = logit / max(self.temperature, 1e-6)
             probability = 1 / (1 + math.exp(-scaled_logit))
             
         return float(probability)
@@ -179,27 +213,20 @@ class BiLSTMPredictor:
     def __init__(self, model_dir: Path):
         self.calibration = load_cnn_calibration(model_dir)
         self.word2idx = joblib.load(model_dir / "word2idx.pkl")
-        self.max_len = 100
-        
-        # Create CNN as fallback since BiLSTM is deprecated
-        self.model = CNNClassifier(
-            vocab_size=len(self.word2idx),
-            embedding_dim=128,
-            num_filters=100,
-            filter_sizes=[3, 4, 5],
-            dropout=0.3
-        ).to(device)
+        self.max_len = int(os.getenv("CNN_MAX_LEN", "200"))
         
         # Try to load CNN model, fall back to random if not available
         try:
-            self.model.load_state_dict(
-                torch.load(model_dir / "cnn_model.pth", map_location=device, weights_only=True)
+            self.model, self.model_config = load_cnn_model_compatible(
+                model_dir=model_dir,
+                vocab_size=len(self.word2idx),
             )
             print("✅ CNN fallback model loaded")
         except Exception as e:
             print(f"⚠️ CNN model not found, using untrained model: {e}")
+            self.model = CNNClassifier(vocab_size=len(self.word2idx), embedding_dim=128).to(device)
+            self.model.eval()
         
-        self.model.eval()
         self.temperature = self.calibration["temperature"]
         self.decision_threshold = self.calibration["threshold"]
 
@@ -215,10 +242,8 @@ class BiLSTMPredictor:
     def predict_proba(self, text: str) -> float:
         sequence = self._text_to_sequence(text)
         with torch.no_grad():
-            output = self.model(sequence)
-            raw_prob = output.item()
-            logit = math.log(raw_prob / (1 - raw_prob + 1e-10) + 1e-10)
-            scaled_logit = logit / self.temperature
+            logit = self.model(sequence).squeeze(1).item()
+            scaled_logit = logit / max(self.temperature, 1e-6)
             probability = 1 / (1 + math.exp(-scaled_logit))
         return float(probability)
 
