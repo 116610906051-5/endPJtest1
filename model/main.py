@@ -76,7 +76,9 @@ class BiLSTMPredictor:
             num_layers=2,
             dropout=0.3
         ).to(device)
-        self.model.load_state_dict(torch.load(model_dir / "lstm_model.pth", map_location=device))
+        self.model.load_state_dict(
+            torch.load(model_dir / "lstm_model.pth", map_location=device, weights_only=True)
+        )
         self.model.eval()
 
     def _text_to_sequence(self, text: str) -> torch.Tensor:
