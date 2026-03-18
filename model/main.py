@@ -36,9 +36,22 @@ print(f"🖥️ Using device: {device}")
 BASE_DIR = Path(__file__).resolve().parent
 
 
+def resolve_asset_file(filename: str) -> Path:
+    """Resolve model artifact path from common deployment locations."""
+    candidates = [
+        BASE_DIR / filename,
+        BASE_DIR / "model" / filename,
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    # fallback to BASE_DIR for clear error path
+    return BASE_DIR / filename
+
+
 def load_cnn_calibration(model_dir: Path) -> dict:
     """Load CNN calibration config from cnn_calibration.json with safe defaults."""
-    calibration_path = model_dir / "cnn_calibration.json"
+    calibration_path = resolve_asset_file("cnn_calibration.json")
     default_temperature = float(os.getenv("CNN_TEMPERATURE", "2.2"))
     default_threshold = float(os.getenv("CNN_DECISION_THRESHOLD", "0.5"))
 
@@ -127,12 +140,41 @@ class CNNClassifier(nn.Module):
         return out
 
 
+class LegacyBiLSTMClassifier(nn.Module):
+    """Legacy BiLSTM architecture kept for robust fallback on deployment."""
+    def __init__(self, vocab_size, embedding_dim=128, hidden_dim=64, num_layers=2, dropout=0.3):
+        super(LegacyBiLSTMClassifier, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
+        self.lstm = nn.LSTM(
+            embedding_dim,
+            hidden_dim,
+            num_layers=num_layers,
+            bidirectional=True,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0,
+        )
+        self.dropout = nn.Dropout(dropout)
+        self.fc1 = nn.Linear(hidden_dim * 2, 64)
+        self.fc2 = nn.Linear(64, 1)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        embedded = self.embedding(x)
+        _, (hidden, _) = self.lstm(embedded)
+        hidden = torch.cat((hidden[-2], hidden[-1]), dim=1)
+        hidden = self.dropout(hidden)
+        out = self.relu(self.fc1(hidden))
+        out = self.dropout(out)
+        out = self.fc2(out)
+        return out
+
+
 def load_cnn_model_compatible(model_dir: Path, vocab_size: int) -> tuple:
     """
     Load CNN weights with architecture compatibility.
     Try latest training architecture first, then legacy one.
     """
-    model_path = model_dir / "cnn_model.pth"
+    model_path = resolve_asset_file("cnn_model.pth")
 
     # Latest training profile (train_cnn.py)
     latest_cfg = {
@@ -173,7 +215,7 @@ class CNNPredictor:
     """CNN-based predictor for fake news detection (primary model)."""
     def __init__(self, model_dir: Path):
         self.calibration = load_cnn_calibration(model_dir)
-        self.word2idx = joblib.load(model_dir / "word2idx.pkl")
+        self.word2idx = joblib.load(resolve_asset_file("word2idx.pkl"))
         self.max_len = int(os.getenv("CNN_MAX_LEN", "200"))
 
         self.model, self.model_config = load_cnn_model_compatible(
@@ -212,8 +254,9 @@ class BiLSTMPredictor:
     """BiLSTM predictor (fallback when CNN model is unavailable)."""
     def __init__(self, model_dir: Path):
         self.calibration = load_cnn_calibration(model_dir)
-        self.word2idx = joblib.load(model_dir / "word2idx.pkl")
+        self.word2idx = joblib.load(resolve_asset_file("word2idx.pkl"))
         self.max_len = int(os.getenv("CNN_MAX_LEN", "200"))
+        self.backend = "cnn"
         
         # Try to load CNN model, fall back to random if not available
         try:
@@ -223,9 +266,21 @@ class BiLSTMPredictor:
             )
             print("✅ CNN fallback model loaded")
         except Exception as e:
-            print(f"⚠️ CNN model not found, using untrained model: {e}")
-            self.model = CNNClassifier(vocab_size=len(self.word2idx), embedding_dim=128).to(device)
-            self.model.eval()
+            print(f"⚠️ CNN model not found, trying legacy BiLSTM: {e}")
+            lstm_path = resolve_asset_file("lstm_model.pth")
+            try:
+                self.model = LegacyBiLSTMClassifier(vocab_size=len(self.word2idx)).to(device)
+                self.model.load_state_dict(
+                    torch.load(lstm_path, map_location=device, weights_only=True)
+                )
+                self.model.eval()
+                self.backend = "legacy_bilstm"
+                print(f"✅ Loaded legacy BiLSTM fallback: {lstm_path}")
+            except Exception as e2:
+                print(f"⚠️ Legacy BiLSTM fallback failed, using untrained safety model: {e2}")
+                self.model = CNNClassifier(vocab_size=len(self.word2idx), embedding_dim=128).to(device)
+                self.model.eval()
+                self.backend = "untrained_cnn"
         
         self.temperature = self.calibration["temperature"]
         self.decision_threshold = self.calibration["threshold"]
@@ -279,7 +334,7 @@ def load_predictor():
     """
     preferred_model = os.getenv("PREFERRED_MODEL", "cnn").lower()
     wangchanberta_dir = Path(os.getenv("WANGCHANBERTA_MODEL_DIR", str(BASE_DIR / "wangchanberta_model")))
-    cnn_model_path = BASE_DIR / "cnn_model.pth"
+    cnn_model_path = resolve_asset_file("cnn_model.pth")
 
     # ✅ Try CNN first
     if preferred_model in ["cnn", "primary"] and cnn_model_path.exists():
@@ -311,9 +366,12 @@ def load_predictor():
         return "CNN (fallback)", predictor
     except Exception as e:
         print(f"⚠️ CNN fallback failed: {e}")
-        # Use BiLSTM predictor which internally uses CNN
+        # Use BiLSTM predictor which can fallback to real legacy BiLSTM weights
         predictor = BiLSTMPredictor(BASE_DIR)
-        print("✅ Using CNN via BiLSTMPredictor interface (fallback)")
+        if getattr(predictor, "backend", "") == "legacy_bilstm":
+            print("✅ Using legacy BiLSTM fallback")
+            return "BiLSTM (legacy fallback)", predictor
+        print("✅ Using emergency fallback predictor")
         return "CNN (emergency fallback)", predictor
 
 ACTIVE_MODEL_NAME, predictor = load_predictor()
