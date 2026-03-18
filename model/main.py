@@ -548,10 +548,18 @@ def adjust_confidence_with_related_news(
     related_news: List[dict],
     user_text: str
 ) -> tuple:
-    """ปรับ confidence ตามข่าวที่เกี่ยวข้อง"""
+    """
+    ปรับ confidence ตามผลค้นหาข่าวที่เกี่ยวข้อง
+
+    กติกาใหม่:
+    - ไม่เพิ่มความน่าเชื่อถือจากการค้นหา (เพิ่มไม่ได้)
+    - ถ้าไม่เจอข่าวที่เกี่ยวข้อง/ใกล้เคียง -> ลดความน่าเชื่อถือ
+    """
     
     if not related_news:
-        return original_confidence, []
+        adjustment = -10.0
+        adjusted_confidence = max(original_confidence + adjustment, 5.0)
+        return adjusted_confidence, [], adjustment, "no_related_news"
     
     related_items = []
     max_similarity = 0.0
@@ -578,18 +586,22 @@ def adjust_confidence_with_related_news(
             "is_trusted": is_trusted
         })
     
-    # ปรับ confidence
-    # ถ้ามีข่าวจากแหล่งที่น่าเชื่อถือและคล้ายคลึงกัน -> เพิ่ม confidence
-    adjustment = 0.0
-    
-    if trusted_count > 0 and max_similarity > 0.3:
-        # เพิ่ม confidence ตามจำนวนแหล่งที่เชื่อถือและความคล้ายคลึง
-        adjustment = min(trusted_count * max_similarity * 10, 8)  # เพิ่มสูงสุด 8% เท่านั้น
-    
-    # Cap confidence at 80% to avoid overconfidence even with related news
-    adjusted_confidence = min(original_confidence + adjustment, 80.0)
-    
-    return adjusted_confidence, related_items
+    # ปรับ confidence (ไม่เพิ่มคะแนน)
+    # - คล้ายกันมากและมีแหล่งน่าเชื่อถือ: คงเดิม
+    # - คล้ายกันน้อย: ลดเล็กน้อย
+    # - แทบไม่คล้าย: ลดมากขึ้น
+    if max_similarity >= 0.45 and trusted_count > 0:
+        adjustment = 0.0
+        reason = "strong_related_match"
+    elif max_similarity >= 0.25:
+        adjustment = -3.0
+        reason = "weak_related_match"
+    else:
+        adjustment = -8.0
+        reason = "unrelated_search_results"
+
+    adjusted_confidence = max(min(original_confidence + adjustment, 85.0), 5.0)
+    return adjusted_confidence, related_items, adjustment, reason
 
 @app.get("/")
 def read_root():
@@ -648,9 +660,11 @@ def predict(news: News):
     probability = predictor.predict_proba(news.text)
     
     # แปลงเป็นความเชื่อมั่นและ label
-    # Apply confidence capping: limit extreme values to make predictions more reasonable
-    # Cap at 85% to avoid overconfidence
-    capped_probability = min(max(probability, 0.15), 0.85)
+    # Calibrate probability ให้ยืดหยุ่นขึ้นและลด overconfidence
+    # ดึงค่าปลายสุดเข้าหา 0.5 เล็กน้อย (shrink toward neutral)
+    shrink_factor = float(os.getenv("PREDICTION_SHRINK", "0.72"))
+    calibrated_probability = 0.5 + (probability - 0.5) * shrink_factor
+    capped_probability = min(max(calibrated_probability, 0.10), 0.90)
     
     # ✅ ลดความเชื่อมั่นถ้ามีคำไม่เหมาะสม
     if text_quality["quality_score"] < 1.0:
@@ -688,29 +702,40 @@ def predict(news: News):
         print(f"🔄 Override: {original_label} ({original_confidence}%) -> ข่าวจริง (95.0%) ด้วย URL verification")
     
     # ถ้าต้องการตรวจสอบข่าวที่เกี่ยวข้อง (แต่ถ้าข้อความมีคุณภาพต่ำ ห้ามค้นหา)
-    if news.check_related and text_quality["is_valid"]:
+    if news.check_related and text_quality["is_valid"] and not url_override:
         print(f"\n✅ check_related is True, searching for related news...")
         related_news = search_related_news(news.text)
         print(f"📊 Search returned {len(related_news)} articles")
-        
-        if related_news:
-            adjusted_confidence, related_items = adjust_confidence_with_related_news(
-                confidence_percent,
-                related_news,
-                news.text
-            )
-            
-            response["confidence"] = round(adjusted_confidence, 1)
-            response["original_confidence"] = confidence_percent
-            response["confidence_adjustment"] = round(adjusted_confidence - confidence_percent, 1)
-            response["related_news"] = related_items
+
+        adjusted_confidence, related_items, adjustment, reason = adjust_confidence_with_related_news(
+            confidence_percent,
+            related_news,
+            news.text
+        )
+
+        response["confidence"] = round(adjusted_confidence, 1)
+        response["original_confidence"] = confidence_percent
+        response["confidence_adjustment"] = round(adjustment, 1)
+        response["related_news"] = related_items
+        response["related_news_reason"] = reason
+
+        if related_items:
             response["verification_note"] = (
                 f"พบข่าวที่เกี่ยวข้อง {len(related_items)} รายการ "
-                f"จากแหล่งที่น่าเชื่อถือ {sum(1 for r in related_items if r['is_trusted'])} แหล่ง"
+                f"จากแหล่งที่น่าเชื่อถือ {sum(1 for r in related_items if r['is_trusted'])} แหล่ง "
+                f"(ไม่มีการเพิ่มความน่าเชื่อถือจากผลค้นหา)"
             )
             print(f"✅ Added {len(related_items)} related news items to response")
         else:
-            print(f"⚠️ No related news found")
+            response["verification_note"] = "ไม่พบข่าวที่เกี่ยวข้องหรือใกล้เคียง จึงลดความน่าเชื่อถือลง"
+            print(f"⚠️ No related news found, confidence reduced")
+
+        # ปรับ label ตามค่าความน่าเชื่อถือหลังผ่าน related-news logic
+        response["label"] = "ข่าวจริง" if response["confidence"] >= 50.0 else "ข่าวปลอม"
+    elif news.check_related and url_override:
+        print(f"ℹ️ URL verified: skip related-news confidence adjustment")
+        response["search_skipped"] = True
+        response["search_skip_reason"] = "ยืนยันด้วย URL จากแหล่งน่าเชื่อถือแล้ว จึงไม่ปรับคะแนนจากผลค้นหา"
     elif news.check_related and not text_quality["is_valid"]:
         print(f"⚠️ Skipping API search - text quality too low")
         response["search_skipped"] = True
