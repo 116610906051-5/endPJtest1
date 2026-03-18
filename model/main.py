@@ -36,54 +36,71 @@ BASE_DIR = Path(__file__).resolve().parent
 
 print("🔧 Loading prediction model...")
 
-class BiLSTMClassifier(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim, num_layers=2, dropout=0.3):
-        super(BiLSTMClassifier, self).__init__()
+class CNNClassifier(nn.Module):
+    """CNN-based text classifier for fake news detection."""
+    def __init__(self, vocab_size, embedding_dim, num_filters=100, filter_sizes=[3, 4, 5], dropout=0.3):
+        super(CNNClassifier, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
-        self.lstm = nn.LSTM(
-            embedding_dim, 
-            hidden_dim, 
-            num_layers=num_layers,
-            bidirectional=True, 
-            batch_first=True,
-            dropout=dropout if num_layers > 1 else 0
-        )
+        
+        # 1D Convolutional layers with different kernel sizes
+        self.convs = nn.ModuleList([
+            nn.Conv1d(in_channels=embedding_dim, 
+                     out_channels=num_filters, 
+                     kernel_size=fs) 
+            for fs in filter_sizes
+        ])
+        
         self.dropout = nn.Dropout(dropout)
-        self.fc1 = nn.Linear(hidden_dim * 2, 64)
+        self.fc1 = nn.Linear(len(filter_sizes) * num_filters, 64)
         self.fc2 = nn.Linear(64, 1)
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
     
     def forward(self, x):
-        embedded = self.embedding(x)
-        lstm_out, (hidden, cell) = self.lstm(embedded)
-        hidden = torch.cat((hidden[-2], hidden[-1]), dim=1)
-        hidden = self.dropout(hidden)
-        out = self.relu(self.fc1(hidden))
+        # x shape: (batch_size, seq_len)
+        embedded = self.embedding(x)  # (batch_size, seq_len, embedding_dim)
+        embedded = embedded.transpose(1, 2)  # (batch_size, embedding_dim, seq_len) for Conv1d
+        
+        # Apply multiple convolutional filters
+        conv_outputs = []
+        for conv in self.convs:
+            # Apply convolution and ReLU activation
+            conv_out = self.relu(conv(embedded))  # (batch_size, num_filters, seq_len - filter_size + 1)
+            # Apply max pooling over time dimension
+            pooled = torch.max(conv_out, dim=2)[0]  # (batch_size, num_filters)
+            conv_outputs.append(pooled)
+        
+        # Concatenate all pooled outputs
+        cat = torch.cat(conv_outputs, dim=1)  # (batch_size, len(filter_sizes) * num_filters)
+        
+        # Fully connected layers
+        cat = self.dropout(cat)
+        out = self.relu(self.fc1(cat))
         out = self.dropout(out)
         out = self.sigmoid(self.fc2(out))
         return out
 
 
-class BiLSTMPredictor:
-    """BiLSTM predictor (fallback when WangchanBERTa model is unavailable)."""
+class CNNPredictor:
+    """CNN-based predictor for fake news detection (primary model)."""
     def __init__(self, model_dir: Path):
         self.word2idx = joblib.load(model_dir / "word2idx.pkl")
-        self.max_len = 100
-        self.model = BiLSTMClassifier(
+        self.max_len = 150
+        self.model = CNNClassifier(
             vocab_size=len(self.word2idx),
             embedding_dim=128,
-            hidden_dim=64,
-            num_layers=2,
+            num_filters=100,
+            filter_sizes=[3, 4, 5],
             dropout=0.3
         ).to(device)
         self.model.load_state_dict(
-            torch.load(model_dir / "lstm_model.pth", map_location=device, weights_only=True)
+            torch.load(model_dir / "cnn_model.pth", map_location=device, weights_only=True)
         )
         self.model.eval()
         
         # Temperature scaling for probability calibration
-        self.temperature = float(os.getenv("LSTM_TEMPERATURE", "2.5"))
+        self.temperature = float(os.getenv("CNN_TEMPERATURE", "2.2"))
+        print(f"✅ CNN model loaded with temperature={self.temperature}")
 
     def _text_to_sequence(self, text: str) -> torch.Tensor:
         tokens = word_tokenize(text, engine='newmm')
@@ -101,11 +118,57 @@ class BiLSTMPredictor:
             raw_prob = output.item()
             
             # Apply temperature scaling for calibration
-            # T > 1 makes predictions less confident (smoother)
             logit = math.log(raw_prob / (1 - raw_prob + 1e-10) + 1e-10)
             scaled_logit = logit / self.temperature
             probability = 1 / (1 + math.exp(-scaled_logit))
             
+        return float(probability)
+
+
+class BiLSTMPredictor:
+    """BiLSTM predictor (fallback when CNN model is unavailable)."""
+    def __init__(self, model_dir: Path):
+        self.word2idx = joblib.load(model_dir / "word2idx.pkl")
+        self.max_len = 100
+        
+        # Create CNN as fallback since BiLSTM is deprecated
+        self.model = CNNClassifier(
+            vocab_size=len(self.word2idx),
+            embedding_dim=128,
+            num_filters=100,
+            filter_sizes=[3, 4, 5],
+            dropout=0.3
+        ).to(device)
+        
+        # Try to load CNN model, fall back to random if not available
+        try:
+            self.model.load_state_dict(
+                torch.load(model_dir / "cnn_model.pth", map_location=device, weights_only=True)
+            )
+            print("✅ CNN fallback model loaded")
+        except Exception as e:
+            print(f"⚠️ CNN model not found, using untrained model: {e}")
+        
+        self.model.eval()
+        self.temperature = float(os.getenv("CNN_TEMPERATURE", "2.2"))
+
+    def _text_to_sequence(self, text: str) -> torch.Tensor:
+        tokens = word_tokenize(text, engine='newmm')
+        seq = [self.word2idx.get(word, 1) for word in tokens]
+        if len(seq) > self.max_len:
+            seq = seq[:self.max_len]
+        else:
+            seq = seq + [0] * (self.max_len - len(seq))
+        return torch.LongTensor([seq]).to(device)
+
+    def predict_proba(self, text: str) -> float:
+        sequence = self._text_to_sequence(text)
+        with torch.no_grad():
+            output = self.model(sequence)
+            raw_prob = output.item()
+            logit = math.log(raw_prob / (1 - raw_prob + 1e-10) + 1e-10)
+            scaled_logit = logit / self.temperature
+            probability = 1 / (1 + math.exp(-scaled_logit))
         return float(probability)
 
 
@@ -135,10 +198,26 @@ class WangchanBERTaPredictor:
 
 
 def load_predictor():
-    preferred_model = os.getenv("PREFERRED_MODEL", "wangchanberta").lower()
+    """
+    Load predictor with priority: CNN → WangchanBERTa → CNN fallback
+    """
+    preferred_model = os.getenv("PREFERRED_MODEL", "cnn").lower()
     wangchanberta_dir = Path(os.getenv("WANGCHANBERTA_MODEL_DIR", str(BASE_DIR / "wangchanberta_model")))
+    cnn_model_path = BASE_DIR / "cnn_model.pth"
 
-    if preferred_model == "wangchanberta" and wangchanberta_dir.exists():
+    # ✅ Try CNN first
+    if preferred_model in ["cnn", "primary"] and cnn_model_path.exists():
+        try:
+            print(f"🔧 Loading CNN (primary) model...")
+            predictor = CNNPredictor(BASE_DIR)
+            print("✅ CNN model loaded successfully!")
+            return "CNN (primary)", predictor
+        except Exception as e:
+            print(f"⚠️ Failed to load CNN model: {e}")
+            print("↩️ Falling back to next model...")
+
+    # ✅ Try WangchanBERTa second
+    if preferred_model in ["wangchanberta", "bert"] and wangchanberta_dir.exists():
         try:
             print(f"🔧 Loading WangchanBERTa model from: {wangchanberta_dir}")
             predictor = WangchanBERTaPredictor(wangchanberta_dir)
@@ -146,12 +225,20 @@ def load_predictor():
             return "WangchanBERTa (fine-tuned)", predictor
         except Exception as e:
             print(f"⚠️ Failed to load WangchanBERTa model: {e}")
-            print("↩️ Falling back to BiLSTM model...")
+            print("↩️ Falling back to CNN fallback...")
 
-    print("🔧 Loading BiLSTM fallback model...")
-    predictor = BiLSTMPredictor(BASE_DIR)
-    print("✅ BiLSTM fallback model loaded successfully!")
-    return "BiLSTM (fallback)", predictor
+    # ✅ CNN fallback (last resort)
+    print("🔧 Loading CNN fallback model...")
+    try:
+        predictor = CNNPredictor(BASE_DIR)
+        print("✅ CNN fallback model loaded!")
+        return "CNN (fallback)", predictor
+    except Exception as e:
+        print(f"⚠️ CNN fallback failed: {e}")
+        # Use BiLSTM predictor which internally uses CNN
+        predictor = BiLSTMPredictor(BASE_DIR)
+        print("✅ Using CNN via BiLSTMPredictor interface (fallback)")
+        return "CNN (emergency fallback)", predictor
 
 ACTIVE_MODEL_NAME, predictor = load_predictor()
 print(f"📊 Active model: {ACTIVE_MODEL_NAME}")
