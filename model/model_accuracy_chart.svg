@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <defs>
+    <style>
+      .title { font: 700 34px 'Segoe UI', Tahoma, sans-serif; fill: #0f172a; }
+      .subtitle { font: 500 18px 'Segoe UI', Tahoma, sans-serif; fill: #334155; }
+      .axis { stroke: #334155; stroke-width: 2; }
+      .grid { stroke: #cbd5e1; stroke-width: 1; }
+      .label { font: 600 16px 'Segoe UI', Tahoma, sans-serif; fill: #0f172a; }
+      .tick { font: 500 13px 'Segoe UI', Tahoma, sans-serif; fill: #475569; }
+      .value { font: 700 18px 'Segoe UI', Tahoma, sans-serif; fill: #0f172a; }
+    </style>
+    <linearGradient id="barBlue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="barGreen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="1200" height="700" fill="#f8fafc"/>
+
+  <!-- Title -->
+  <text x="600" y="55" text-anchor="middle" class="title">กราฟความแม่นยำของโมเดล</text>
+  <text x="600" y="85" text-anchor="middle" class="subtitle">Accuracy Comparison (%)</text>
+
+  <!-- Plot area -->
+  <rect x="130" y="120" width="940" height="480" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+
+  <!-- Grid lines (0..100 by 10) -->
+  <line x1="200" y1="560" x2="1030" y2="560" class="grid"/>
+  <line x1="200" y1="516" x2="1030" y2="516" class="grid"/>
+  <line x1="200" y1="472" x2="1030" y2="472" class="grid"/>
+  <line x1="200" y1="428" x2="1030" y2="428" class="grid"/>
+  <line x1="200" y1="384" x2="1030" y2="384" class="grid"/>
+  <line x1="200" y1="340" x2="1030" y2="340" class="grid"/>
+  <line x1="200" y1="296" x2="1030" y2="296" class="grid"/>
+  <line x1="200" y1="252" x2="1030" y2="252" class="grid"/>
+  <line x1="200" y1="208" x2="1030" y2="208" class="grid"/>
+  <line x1="200" y1="164" x2="1030" y2="164" class="grid"/>
+  <line x1="200" y1="120" x2="1030" y2="120" class="grid"/>
+
+  <!-- Axes -->
+  <line x1="200" y1="120" x2="200" y2="560" class="axis"/>
+  <line x1="200" y1="560" x2="1030" y2="560" class="axis"/>
+
+  <!-- Y ticks -->
+  <text x="188" y="565" text-anchor="end" class="tick">0</text>
+  <text x="188" y="521" text-anchor="end" class="tick">10</text>
+  <text x="188" y="477" text-anchor="end" class="tick">20</text>
+  <text x="188" y="433" text-anchor="end" class="tick">30</text>
+  <text x="188" y="389" text-anchor="end" class="tick">40</text>
+  <text x="188" y="345" text-anchor="end" class="tick">50</text>
+  <text x="188" y="301" text-anchor="end" class="tick">60</text>
+  <text x="188" y="257" text-anchor="end" class="tick">70</text>
+  <text x="188" y="213" text-anchor="end" class="tick">80</text>
+  <text x="188" y="169" text-anchor="end" class="tick">90</text>
+  <text x="188" y="125" text-anchor="end" class="tick">100</text>
+
+  <!-- Y-axis label -->
+  <text x="70" y="350" transform="rotate(-90 70,350)" text-anchor="middle" class="label">ความแม่นยำ (เปอร์เซ็นต์)</text>
+
+  <!-- Bars -->
+  <!-- Mapping: y = 560 - accuracy*4.4 -->
+  <!-- Stacking 85.19 => y=185.16 height=374.84 -->
+  <rect x="330" y="185.16" width="180" height="374.84" fill="url(#barBlue)" rx="10"/>
+  <!-- BiLSTM 98.90 => y=124.84 height=435.16 -->
+  <rect x="700" y="124.84" width="180" height="435.16" fill="url(#barGreen)" rx="10"/>
+
+  <!-- X labels -->
+  <text x="420" y="595" text-anchor="middle" class="label">Stacking Ensemble</text>
+  <text x="790" y="595" text-anchor="middle" class="label">BiLSTM (Current)</text>
+
+  <!-- Value labels -->
+  <text x="420" y="170" text-anchor="middle" class="value">85.19%</text>
+  <text x="790" y="110" text-anchor="middle" class="value">98.90%</text>
+
+  <!-- Legend -->
+  <rect x="870" y="30" width="16" height="16" fill="url(#barGreen)" rx="3"/>
+  <text x="894" y="43" class="tick">โมเดลที่ใช้งานอยู่ตอนนี้</text>
+</svg>

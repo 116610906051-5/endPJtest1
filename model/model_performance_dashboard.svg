@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="980" viewBox="0 0 1700 980">
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .card { fill: #ffffff; stroke: #dbe3ee; stroke-width: 1.5; rx: 12; ry: 12; }
+      .title { font: 700 36px 'Segoe UI', Tahoma, sans-serif; fill: #0f172a; }
+      .h2 { font: 700 24px 'Segoe UI', Tahoma, sans-serif; fill: #0f172a; }
+      .h3 { font: 700 20px 'Segoe UI', Tahoma, sans-serif; fill: #0f172a; }
+      .txt { font: 500 16px 'Segoe UI', Tahoma, sans-serif; fill: #334155; }
+      .small { font: 500 14px 'Segoe UI', Tahoma, sans-serif; fill: #475569; }
+      .num { font: 700 30px 'Segoe UI', Tahoma, sans-serif; fill: #0f172a; }
+      .axis { stroke: #1e293b; stroke-width: 2; }
+      .grid { stroke: #dbe3ee; stroke-width: 1; }
+      .table-border { stroke: #cbd5e1; stroke-width: 1.2; fill: #fff; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1700" height="980"/>
+
+  <text class="title" x="60" y="65">Model Performance Dashboard</text>
+  <text class="txt" x="60" y="98">Dataset rows: 4993 | Test rows: 999 | Split: train_test_split(test_size=0.2, random_state=42)</text>
+
+  <!-- Left: KPI cards -->
+  <rect class="card" x="40" y="130" width="780" height="260"/>
+  <text class="h2" x="60" y="170">Key Metrics</text>
+
+  <rect x="60" y="190" width="360" height="180" fill="#eff6ff" stroke="#bfdbfe" rx="12"/>
+  <text class="h3" x="80" y="225" fill="#1d4ed8">Stacking Ensemble</text>
+  <text class="small" x="80" y="255">Accuracy</text>
+  <text class="num" x="80" y="290">85.19%</text>
+  <text class="small" x="80" y="320">F1-weighted: 0.8513</text>
+  <text class="small" x="80" y="345">ROC-AUC: 0.9232</text>
+
+  <rect x="440" y="190" width="360" height="180" fill="#ecfdf5" stroke="#a7f3d0" rx="12"/>
+  <text class="h3" x="460" y="225" fill="#047857">BiLSTM</text>
+  <text class="small" x="460" y="255">Accuracy</text>
+  <text class="num" x="460" y="290">98.90%</text>
+  <text class="small" x="460" y="320">F1-weighted: 0.9890</text>
+  <text class="small" x="460" y="345">ROC-AUC: 0.9998</text>
+
+  <!-- Left middle: accuracy bars -->
+  <rect class="card" x="40" y="410" width="780" height="220"/>
+  <text class="h2" x="60" y="450">Accuracy Comparison</text>
+
+  <text class="txt" x="60" y="495">Stacking Ensemble</text>
+  <rect x="270" y="478" width="500" height="28" fill="#e2e8f0" rx="14"/>
+  <rect x="270" y="478" width="425.93" height="28" fill="#2563eb" rx="14"/>
+  <text class="txt" x="780" y="500" text-anchor="end">85.19%</text>
+
+  <text class="txt" x="60" y="555">BiLSTM</text>
+  <rect x="270" y="538" width="500" height="28" fill="#e2e8f0" rx="14"/>
+  <rect x="270" y="538" width="494.49" height="28" fill="#059669" rx="14"/>
+  <text class="txt" x="780" y="560" text-anchor="end">98.90%</text>
+
+  <!-- Left bottom: confusion matrices -->
+  <rect class="card" x="40" y="650" width="780" height="290"/>
+  <text class="h2" x="60" y="690">Confusion Matrix</text>
+
+  <text class="h3" x="60" y="730" fill="#1d4ed8">Stacking Ensemble</text>
+  <rect class="table-border" x="60" y="745" width="340" height="170"/>
+  <line x1="60" y1="790" x2="400" y2="790" stroke="#cbd5e1"/>
+  <line x1="60" y1="850" x2="400" y2="850" stroke="#cbd5e1"/>
+  <line x1="160" y1="745" x2="160" y2="915" stroke="#cbd5e1"/>
+  <line x1="280" y1="745" x2="280" y2="915" stroke="#cbd5e1"/>
+  <text class="small" x="220" y="775" text-anchor="middle">Pred 0</text>
+  <text class="small" x="340" y="775" text-anchor="middle">Pred 1</text>
+  <text class="small" x="110" y="825" text-anchor="middle">Actual 0</text>
+  <text class="small" x="110" y="885" text-anchor="middle">Actual 1</text>
+  <text class="txt" x="220" y="825" text-anchor="middle">531</text>
+  <text class="txt" x="340" y="825" text-anchor="middle">66</text>
+  <text class="txt" x="220" y="885" text-anchor="middle">82</text>
+  <text class="txt" x="340" y="885" text-anchor="middle">320</text>
+
+  <text class="h3" x="440" y="730" fill="#047857">BiLSTM</text>
+  <rect class="table-border" x="440" y="745" width="340" height="170"/>
+  <line x1="440" y1="790" x2="780" y2="790" stroke="#cbd5e1"/>
+  <line x1="440" y1="850" x2="780" y2="850" stroke="#cbd5e1"/>
+  <line x1="540" y1="745" x2="540" y2="915" stroke="#cbd5e1"/>
+  <line x1="660" y1="745" x2="660" y2="915" stroke="#cbd5e1"/>
+  <text class="small" x="600" y="775" text-anchor="middle">Pred 0</text>
+  <text class="small" x="720" y="775" text-anchor="middle">Pred 1</text>
+  <text class="small" x="490" y="825" text-anchor="middle">Actual 0</text>
+  <text class="small" x="490" y="885" text-anchor="middle">Actual 1</text>
+  <text class="txt" x="600" y="825" text-anchor="middle">588</text>
+  <text class="txt" x="720" y="825" text-anchor="middle">9</text>
+  <text class="txt" x="600" y="885" text-anchor="middle">2</text>
+  <text class="txt" x="720" y="885" text-anchor="middle">400</text>
+
+  <!-- Right: ROC chart -->
+  <rect class="card" x="840" y="130" width="820" height="810"/>
+  <text class="h2" x="860" y="170">ROC Curve</text>
+  <text class="small" x="860" y="198">Blue: Stacking Ensemble (AUC 0.9232) | Green: BiLSTM (AUC 0.9998)</text>
+
+  <!-- ROC plotting area -->
+  <rect x="860" y="130" width="780" height="500" fill="#fff" stroke="#cbd5e1"/>
+  <line class="grid" x1="860.00" y1="130" x2="860.00" y2="630"/>
+  <line class="grid" x1="860" y1="130.00" x2="1640" y2="130.00"/>
+  <text class="small" x="860.00" y="654" text-anchor="middle">0.0</text>
+  <text class="small" x="846" y="135.00" text-anchor="end">1.0</text>
+  <line class="grid" x1="938.00" y1="130" x2="938.00" y2="630"/>
+  <line class="grid" x1="860" y1="180.00" x2="1640" y2="180.00"/>
+  <text class="small" x="938.00" y="654" text-anchor="middle">0.1</text>
+  <text class="small" x="846" y="185.00" text-anchor="end">0.9</text>
+  <line class="grid" x1="1016.00" y1="130" x2="1016.00" y2="630"/>
+  <line class="grid" x1="860" y1="230.00" x2="1640" y2="230.00"/>
+  <text class="small" x="1016.00" y="654" text-anchor="middle">0.2</text>
+  <text class="small" x="846" y="235.00" text-anchor="end">0.8</text>
+  <line class="grid" x1="1094.00" y1="130" x2="1094.00" y2="630"/>
+  <line class="grid" x1="860" y1="280.00" x2="1640" y2="280.00"/>
+  <text class="small" x="1094.00" y="654" text-anchor="middle">0.3</text>
+  <text class="small" x="846" y="285.00" text-anchor="end">0.7</text>
+  <line class="grid" x1="1172.00" y1="130" x2="1172.00" y2="630"/>
+  <line class="grid" x1="860" y1="330.00" x2="1640" y2="330.00"/>
+  <text class="small" x="1172.00" y="654" text-anchor="middle">0.4</text>
+  <text class="small" x="846" y="335.00" text-anchor="end">0.6</text>
+  <line class="grid" x1="1250.00" y1="130" x2="1250.00" y2="630"/>
+  <line class="grid" x1="860" y1="380.00" x2="1640" y2="380.00"/>
+  <text class="small" x="1250.00" y="654" text-anchor="middle">0.5</text>
+  <text class="small" x="846" y="385.00" text-anchor="end">0.5</text>
+  <line class="grid" x1="1328.00" y1="130" x2="1328.00" y2="630"/>
+  <line class="grid" x1="860" y1="430.00" x2="1640" y2="430.00"/>
+  <text class="small" x="1328.00" y="654" text-anchor="middle">0.6</text>
+  <text class="small" x="846" y="435.00" text-anchor="end">0.4</text>
+  <line class="grid" x1="1406.00" y1="130" x2="1406.00" y2="630"/>
+  <line class="grid" x1="860" y1="480.00" x2="1640" y2="480.00"/>
+  <text class="small" x="1406.00" y="654" text-anchor="middle">0.7</text>
+  <text class="small" x="846" y="485.00" text-anchor="end">0.3</text>
+  <line class="grid" x1="1484.00" y1="130" x2="1484.00" y2="630"/>
+  <line class="grid" x1="860" y1="530.00" x2="1640" y2="530.00"/>
+  <text class="small" x="1484.00" y="654" text-anchor="middle">0.8</text>
+  <text class="small" x="846" y="535.00" text-anchor="end">0.2</text>
+  <line class="grid" x1="1562.00" y1="130" x2="1562.00" y2="630"/>
+  <line class="grid" x1="860" y1="580.00" x2="1640" y2="580.00"/>
+  <text class="small" x="1562.00" y="654" text-anchor="middle">0.9</text>
+  <text class="small" x="846" y="585.00" text-anchor="end">0.1</text>
+  <line class="grid" x1="1640.00" y1="130" x2="1640.00" y2="630"/>
+  <line class="grid" x1="860" y1="630.00" x2="1640" y2="630.00"/>
+  <text class="small" x="1640.00" y="654" text-anchor="middle">1.0</text>
+  <text class="small" x="846" y="635.00" text-anchor="end">0.0</text>
+
+  <line class="axis" x1="860" y1="630" x2="1640" y2="630"/>
+  <line class="axis" x1="860" y1="130" x2="860" y2="630"/>
+  <line x1="860" y1="630" x2="1640" y2="130" stroke="#64748b" stroke-width="2.2" stroke-dasharray="9 7"/>
+
+  <polyline fill="none" stroke="#2563eb" stroke-width="3.2" points="860.00,630.00 860.00,628.76 860.00,627.51 860.00,625.02 860.00,597.66 861.31,597.66 861.31,555.37 862.61,555.37 862.61,465.82 863.92,465.82 863.92,460.85 866.53,460.85 866.53,409.85 869.15,409.85 869.15,403.63 870.45,403.63 870.45,402.39 871.76,402.39 871.76,397.41 873.07,397.41 873.07,388.71 874.37,388.71 874.37,373.78 875.68,373.78 875.68,370.05 876.98,370.05 876.98,367.56 878.29,367.56 878.29,365.07 878.29,362.59 878.29,356.37 879.60,356.37 879.60,347.66 880.90,347.66 880.90,341.44 882.21,341.44 882.21,338.96 883.52,338.96 883.52,336.47 884.82,336.47 884.82,335.22 886.13,335.22 886.13,327.76 887.44,327.76 887.44,324.03 888.74,324.03 888.74,321.54 890.05,321.54 890.05,319.05 891.36,319.05 891.36,305.37 892.66,305.37 892.66,299.15 893.97,299.15 893.97,296.67 896.58,296.67 896.58,295.42 900.50,295.42 900.50,292.94 903.12,292.94 904.42,292.94 904.42,290.45 905.73,290.45 905.73,274.28 907.04,274.28 907.04,269.30 908.34,269.30 908.34,268.06 909.65,268.06 909.65,266.82 910.95,266.82 910.95,261.84 914.87,261.84 914.87,258.11 916.18,258.11 916.18,255.62 918.79,255.62 918.79,254.38 921.41,254.38 921.41,251.89 922.71,251.89 922.71,250.65 925.33,250.65 925.33,246.92 930.55,246.92 930.55,245.67 931.86,245.67 931.86,244.43 933.17,244.43 933.17,240.70 935.78,240.70 935.78,239.45 938.39,239.45 938.39,236.97 939.70,236.97 939.70,235.72 946.23,235.72 946.23,228.26 948.84,228.26 948.84,227.01 950.15,227.01 950.15,225.77 952.76,225.77 952.76,223.28 957.99,223.28 957.99,220.80 961.91,220.80 961.91,219.55 963.22,219.55 963.22,217.06 964.52,217.06 964.52,215.82 965.83,215.82 965.83,214.58 967.14,214.58 967.14,212.09 968.44,212.09 968.44,210.85 971.06,210.85 971.06,209.60 973.67,209.60 973.67,208.36 976.28,208.36 976.28,205.87 977.59,205.87 977.59,204.63 978.89,204.63 978.89,203.38 980.20,203.38 982.81,203.38 986.73,203.38 986.73,200.90 988.04,200.90 988.04,199.65 989.35,199.65 989.35,194.68 998.49,194.68 998.49,193.43 1005.03,193.43 1005.03,190.95 1006.33,190.95 1006.33,187.21 1007.64,187.21 1007.64,184.73 1010.25,184.73 1010.25,183.48 1024.62,183.48 1024.62,182.24 1029.85,182.24 1029.85,179.75 1040.30,179.75 1040.30,178.51 1048.14,178.51 1048.14,177.26 1050.75,177.26 1050.75,176.02 1055.98,176.02 1055.98,174.78 1065.13,174.78 1065.13,171.04 1070.35,171.04 1070.35,169.80 1078.19,169.80 1078.19,168.56 1087.34,168.56 1087.34,167.31 1092.56,167.31 1092.56,164.83 1095.18,164.83 1095.18,163.58 1097.79,163.58 1097.79,162.34 1101.71,162.34 1101.71,161.09 1109.55,161.09 1112.16,161.09 1130.45,161.09 1130.45,159.85 1133.07,159.85 1133.07,158.61 1148.74,158.61 1148.74,157.36 1150.05,157.36 1150.05,156.12 1152.66,156.12 1152.66,154.88 1163.12,154.88 1163.12,151.14 1168.34,151.14 1170.95,151.14 1176.18,151.14 1176.18,149.90 1182.71,149.90 1182.71,148.66 1217.99,148.66 1217.99,147.41 1229.75,147.41 1229.75,146.17 1246.73,146.17 1246.73,144.93 1250.65,144.93 1250.65,143.68 1278.09,143.68 1278.09,142.44 1282.01,142.44 1284.62,142.44 1296.38,142.44 1296.38,141.19 1315.98,141.19 1318.59,141.19 1319.90,141.19 1319.90,139.95 1325.13,139.95 1327.74,139.95 1329.05,139.95 1331.66,139.95 1339.50,139.95 1339.50,138.71 1357.79,138.71 1360.40,138.71 1368.24,138.71 1370.85,138.71 1374.77,138.71 1390.45,138.71 1390.45,137.46 1436.18,137.46 1436.18,136.22 1442.71,136.22 1442.71,134.98 1451.86,134.98 1451.86,133.73 1457.09,133.73 1459.70,133.73 1464.92,133.73 1464.92,132.49 1480.60,132.49 1480.60,131.24 1485.83,131.24 1488.44,131.24 1504.12,131.24 1506.73,131.24 1544.62,131.24 1544.62,130.00 1548.54,130.00 1551.16,130.00 1640.00,130.00"/>
+  <polyline fill="none" stroke="#059669" stroke-width="3.2" points="860.00,630.00 860.00,628.76 860.00,606.37 860.00,603.88 860.00,597.66 860.00,595.17 860.00,566.57 860.00,564.08 860.00,556.62 860.00,554.13 860.00,404.88 860.00,402.39 860.00,324.03 860.00,321.54 860.00,284.23 860.00,281.74 860.00,269.30 860.00,266.82 860.00,143.68 861.31,143.68 861.31,142.44 862.61,142.44 862.61,139.95 863.92,139.95 863.92,134.98 870.45,134.98 870.45,132.49 873.07,132.49 873.07,130.00 921.41,130.00 924.02,130.00 969.75,130.00 972.36,130.00 1067.74,130.00 1071.66,130.00 1100.40,130.00 1103.02,130.00 1113.47,130.00 1116.08,130.00 1278.09,130.00 1280.70,130.00 1382.61,130.00 1385.23,130.00 1450.55,130.00 1453.17,130.00 1515.88,130.00 1518.49,130.00 1540.70,130.00 1543.32,130.00 1607.34,130.00 1609.95,130.00 1613.87,130.00 1616.48,130.00 1640.00,130.00"/>
+
+  <text class="txt" x="1250.0" y="685" text-anchor="middle">False Positive Rate</text>
+  <text class="txt" x="805" y="380.0" transform="rotate(-90 805,380.0)" text-anchor="middle">True Positive Rate</text>
+
+  <!-- Legend -->
+  <rect x="1220" y="665" width="420" height="120" fill="#fff" stroke="#cbd5e1" rx="10"/>
+  <line x1="1245" y1="700" x2="1295" y2="700" stroke="#2563eb" stroke-width="4"/>
+  <text class="txt" x="1310" y="706">Stacking Ensemble (AUC 0.9232)</text>
+  <line x1="1245" y1="735" x2="1295" y2="735" stroke="#059669" stroke-width="4"/>
+  <text class="txt" x="1310" y="741">BiLSTM (AUC 0.9998)</text>
+  <line x1="1245" y1="770" x2="1295" y2="770" stroke="#64748b" stroke-width="3" stroke-dasharray="8 6"/>
+  <text class="txt" x="1310" y="776">Baseline</text>
+</svg>

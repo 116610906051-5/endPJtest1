@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import torch
-import torch.nn as nn
 import joblib
 import math
 import requests
@@ -11,9 +10,13 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from typing import Optional, List
 import re
+import os
+from pathlib import Path
+import torch.nn as nn
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-# Version: 1.0.1 - BiLSTM with SearchAPI and Thai keyword support
-app = FastAPI(title="Fake News Detection API - BiLSTM with SearchAPI")
+# Version: 2.0.0 - WangchanBERTa (fine-tuned) with BiLSTM fallback
+app = FastAPI(title="Fake News Detection API - WangchanBERTa with SearchAPI")
 
 # เปิด CORS เพื่อให้ Frontend เรียกได้
 # Updated: Added check_related flag support for SearchAPI integration
@@ -28,9 +31,9 @@ app.add_middleware(
 # ตั้งค่า device (CPU-only)
 device = torch.device('cpu')
 print(f"🖥️ Using device: {device}")
+BASE_DIR = Path(__file__).resolve().parent
 
-# โหลด BiLSTM model
-print("🔧 Loading BiLSTM model...")
+print("🔧 Loading prediction model...")
 
 class BiLSTMClassifier(nn.Module):
     def __init__(self, vocab_size, embedding_dim, hidden_dim, num_layers=2, dropout=0.3):
@@ -60,35 +63,85 @@ class BiLSTMClassifier(nn.Module):
         out = self.sigmoid(self.fc2(out))
         return out
 
-# โหลด word2idx
-word2idx = joblib.load("word2idx.pkl")
-MAX_LEN = 100
 
-# สร้างและโหลด model
-model = BiLSTMClassifier(
-    vocab_size=len(word2idx),
-    embedding_dim=128,
-    hidden_dim=64,
-    num_layers=2,
-    dropout=0.3
-).to(device)
+class BiLSTMPredictor:
+    """BiLSTM predictor (fallback when WangchanBERTa model is unavailable)."""
+    def __init__(self, model_dir: Path):
+        self.word2idx = joblib.load(model_dir / "word2idx.pkl")
+        self.max_len = 100
+        self.model = BiLSTMClassifier(
+            vocab_size=len(self.word2idx),
+            embedding_dim=128,
+            hidden_dim=64,
+            num_layers=2,
+            dropout=0.3
+        ).to(device)
+        self.model.load_state_dict(torch.load(model_dir / "lstm_model.pth", map_location=device))
+        self.model.eval()
 
-model.load_state_dict(torch.load("lstm_model.pth", map_location=device))
-model.eval()
+    def _text_to_sequence(self, text: str) -> torch.Tensor:
+        tokens = word_tokenize(text, engine='newmm')
+        seq = [self.word2idx.get(word, 1) for word in tokens]  # 1 = <UNK>
+        if len(seq) > self.max_len:
+            seq = seq[:self.max_len]
+        else:
+            seq = seq + [0] * (self.max_len - len(seq))  # 0 = <PAD>
+        return torch.LongTensor([seq]).to(device)
 
-print("✅ BiLSTM model loaded successfully!")
-print(f"📊 Model: BiLSTM (Bidirectional LSTM)")
-print(f"📊 Accuracy: 98.90%")
+    def predict_proba(self, text: str) -> float:
+        sequence = self._text_to_sequence(text)
+        with torch.no_grad():
+            output = self.model(sequence)
+            probability = output.item()
+        return float(probability)
 
-def text_to_sequence(text: str, word2idx: dict, max_len: int) -> torch.Tensor:
-    """แปลงข้อความเป็น sequence สำหรับ BiLSTM"""
-    tokens = word_tokenize(text, engine='newmm')
-    seq = [word2idx.get(word, 1) for word in tokens]  # 1 = <UNK>
-    if len(seq) > max_len:
-        seq = seq[:max_len]
-    else:
-        seq = seq + [0] * (max_len - len(seq))  # 0 = <PAD>
-    return torch.LongTensor([seq]).to(device)
+
+class WangchanBERTaPredictor:
+    """Fine-tuned WangchanBERTa predictor for Thai fake news classification."""
+    def __init__(self, model_dir: Path):
+        self.max_len = int(os.getenv("WANGCHANBERTA_MAX_LEN", "128"))
+        self.tokenizer = AutoTokenizer.from_pretrained(str(model_dir), use_fast=False)
+        self.model = AutoModelForSequenceClassification.from_pretrained(str(model_dir)).to(device)
+        self.model.eval()
+
+    def predict_proba(self, text: str) -> float:
+        encoded = self.tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            padding="max_length",
+            max_length=self.max_len
+        )
+        encoded = {k: v.to(device) for k, v in encoded.items()}
+
+        with torch.no_grad():
+            logits = self.model(**encoded).logits
+            probs = torch.softmax(logits, dim=-1)[0]
+            # class 1 = ข่าวจริง, class 0 = ข่าวปลอม
+            return float(probs[1].item())
+
+
+def load_predictor():
+    preferred_model = os.getenv("PREFERRED_MODEL", "wangchanberta").lower()
+    wangchanberta_dir = Path(os.getenv("WANGCHANBERTA_MODEL_DIR", str(BASE_DIR / "wangchanberta_model")))
+
+    if preferred_model == "wangchanberta" and wangchanberta_dir.exists():
+        try:
+            print(f"🔧 Loading WangchanBERTa model from: {wangchanberta_dir}")
+            predictor = WangchanBERTaPredictor(wangchanberta_dir)
+            print("✅ WangchanBERTa model loaded successfully!")
+            return "WangchanBERTa (fine-tuned)", predictor
+        except Exception as e:
+            print(f"⚠️ Failed to load WangchanBERTa model: {e}")
+            print("↩️ Falling back to BiLSTM model...")
+
+    print("🔧 Loading BiLSTM fallback model...")
+    predictor = BiLSTMPredictor(BASE_DIR)
+    print("✅ BiLSTM fallback model loaded successfully!")
+    return "BiLSTM (fallback)", predictor
+
+ACTIVE_MODEL_NAME, predictor = load_predictor()
+print(f"📊 Active model: {ACTIVE_MODEL_NAME}")
 
 # แหล่งข่าวที่น่าเชื่อถือในประเทศไทย
 TRUSTED_NEWS_SOURCES = [
@@ -302,8 +355,8 @@ def adjust_confidence_with_related_news(
 def read_root():
     return {
         "message": "Fake News Detection API - Stacking Ensemble",
-        "model": "Stacking (XGBoost + Random Forest + SVM + Logistic Regression)",
-        "accuracy": "85.19%",
+        "model": ACTIVE_MODEL_NAME,
+        "accuracy": "98.90%" if "BiLSTM" in ACTIVE_MODEL_NAME else "(ใช้ค่าจากผล fine-tune ล่าสุด)",
         "features": [
             "Fake news detection",
             "Related news verification",
@@ -336,12 +389,8 @@ def predict(news: News):
             url_override = True
             print(f"✅ Verified URL from trusted source: {url_verification.get('domain')}")
     
-    # ทำนายด้วย BiLSTM
-    sequence = text_to_sequence(news.text, word2idx, MAX_LEN)
-    
-    with torch.no_grad():
-        output = model(sequence)
-        probability = output.item()
+    # ทำนายด้วยโมเดลที่ active อยู่ (WangchanBERTa หรือ BiLSTM fallback)
+    probability = predictor.predict_proba(news.text)
     
     # แปลงเป็นความเชื่อมั่นและ label
     confidence_percent = round(probability * 100, 1)

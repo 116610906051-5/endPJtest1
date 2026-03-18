@@ -1,5 +1,5 @@
 # News Verification System
-ระบบตรวจสอบข่าวปลอมด้วย Machine Learning (SVM)
+ระบบตรวจสอบข่าวปลอมด้วย Machine Learning (WangchanBERTa + fallback)
 
 ## โครงสร้างโปรเจค
 
@@ -21,7 +21,10 @@ cd model
 # ติดตั้ง Python packages
 pip install -r requirements.txt
 
-# (ถ้ายังไม่มีโมเดล) เทรนโมเดลก่อน
+# (แนะนำ) เทรน WangchanBERTa
+python train_wangchanberta.py --epochs 2 --batch-size 8
+
+# (ทางเลือกเดิม) เทรนโมเดล ensemble แบบคลาสสิก
 python train_svm.py
 
 # รัน FastAPI server
@@ -72,6 +75,14 @@ Frontend จะรันที่: http://localhost:5173
   "result": 1  // 1 = ข่าวจริง, 0 = ข่าวปลอม
 }
 ```
+
+## Model Runtime
+
+- ค่าเริ่มต้น backend จะพยายามโหลดโมเดล fine-tuned จากโฟลเดอร์ `model/wangchanberta_model`
+- ถ้าไม่พบ จะ fallback ไปใช้ BiLSTM เดิมโดยอัตโนมัติ
+- สามารถกำหนดด้วย environment variable:
+  - `PREFERRED_MODEL=wangchanberta`
+  - `WANGCHANBERTA_MODEL_DIR=path/to/wangchanberta_model`
 
 ## เทคโนโลยีที่ใช้
 
