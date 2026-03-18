@@ -80,6 +80,9 @@ class BiLSTMPredictor:
             torch.load(model_dir / "lstm_model.pth", map_location=device, weights_only=True)
         )
         self.model.eval()
+        
+        # Temperature scaling for probability calibration
+        self.temperature = float(os.getenv("LSTM_TEMPERATURE", "2.5"))
 
     def _text_to_sequence(self, text: str) -> torch.Tensor:
         tokens = word_tokenize(text, engine='newmm')
@@ -94,7 +97,14 @@ class BiLSTMPredictor:
         sequence = self._text_to_sequence(text)
         with torch.no_grad():
             output = self.model(sequence)
-            probability = output.item()
+            raw_prob = output.item()
+            
+            # Apply temperature scaling for calibration
+            # T > 1 makes predictions less confident (smoother)
+            logit = math.log(raw_prob / (1 - raw_prob + 1e-10) + 1e-10)
+            scaled_logit = logit / self.temperature
+            probability = 1 / (1 + math.exp(-scaled_logit))
+            
         return float(probability)
 
 
@@ -296,6 +306,28 @@ def extract_keywords(text: str, max_keywords: int = 5) -> List[str]:
     print(f"🔑 Extracted keywords: {keywords}")
     return keywords
 
+def calculate_uncertainty(probability: float) -> dict:
+    """
+    คำนวณระดับความไม่แน่นอน (uncertainty)
+    ถ้า probability ใกล้ 0.5 = ไม่แน่นอนมาก
+    ถ้า probability ใกล้ 0 หรือ 1 = แน่นอนมาก
+    """
+    distance_from_neutral = abs(probability - 0.5)
+    uncertainty_score = 1.0 - (distance_from_neutral * 2)  # 0-1, where 1 = most uncertain
+    
+    if uncertainty_score > 0.7:
+        confidence_level = "ต่ำ - โมเดลไม่แน่ใจ"
+    elif uncertainty_score > 0.4:
+        confidence_level = "ปานกลาง - โมเดลมีข้อสงสัย"
+    else:
+        confidence_level = "สูง - โมเดลค่อนข้างแน่ใจ"
+    
+    return {
+        "uncertainty_score": round(uncertainty_score, 3),
+        "confidence_level": confidence_level,
+        "recommendation": "💡 ควรตรวจสอบข่าวที่เกี่ยวข้อง" if uncertainty_score > 0.4 else "✅ ตรวจสอบแล้ว"
+    }
+
 def calculate_text_similarity(text1: str, text2: str) -> float:
     """คำนวณความคล้ายคลึงระหว่างข้อความ 2 ข้อความ"""
     try:
@@ -347,9 +379,10 @@ def adjust_confidence_with_related_news(
     
     if trusted_count > 0 and max_similarity > 0.3:
         # เพิ่ม confidence ตามจำนวนแหล่งที่เชื่อถือและความคล้ายคลึง
-        adjustment = min(trusted_count * max_similarity * 10, 15)  # เพิ่มสูงสุด 15%
+        adjustment = min(trusted_count * max_similarity * 10, 8)  # เพิ่มสูงสุด 8% เท่านั้น
     
-    adjusted_confidence = min(original_confidence + adjustment, 99.9)
+    # Cap confidence at 80% to avoid overconfidence even with related news
+    adjusted_confidence = min(original_confidence + adjustment, 80.0)
     
     return adjusted_confidence, related_items
 
@@ -395,15 +428,20 @@ def predict(news: News):
     probability = predictor.predict_proba(news.text)
     
     # แปลงเป็นความเชื่อมั่นและ label
-    confidence_percent = round(probability * 100, 1)
-    decision_score = round(probability * 2 - 1, 3)  # แปลงจาก [0,1] เป็น [-1,1]
-    label = "ข่าวจริง" if probability > 0.5 else "ข่าวปลอม"
+    # Apply confidence capping: limit extreme values to make predictions more reasonable
+    # Cap at 85% to avoid overconfidence
+    capped_probability = min(max(probability, 0.15), 0.85)
+    confidence_percent = round(capped_probability * 100, 1)
+    decision_score = round(capped_probability * 2 - 1, 3)  # แปลงจาก [0,1] เป็น [-1,1]
+    label = "ข่าวจริง" if capped_probability > 0.5 else "ข่าวปลอม"
     
     response = {
         "confidence": confidence_percent,
         "decision_score": decision_score,
         "label": label,
-        "raw_score": probability
+        "raw_score": probability,
+        "model": ACTIVE_MODEL_NAME,
+        "uncertainty": calculate_uncertainty(capped_probability)
     }
     
     # ถ้ามี URL ที่ยืนยันได้จากแหล่งที่เชื่อถือ -> ปรับผลลัพธ์
